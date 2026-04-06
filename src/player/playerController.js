@@ -15,6 +15,11 @@ export class PlayerController {
     this.forward = new THREE.Vector3();
     this.side = new THREE.Vector3();
     this.correction = new THREE.Vector3();
+    this.movementState = {
+      horizontalSpeed: 0,
+      normalizedSpeed: 0,
+      onFloor: false,
+    };
 
     this.spawn();
   }
@@ -89,6 +94,16 @@ export class PlayerController {
 
     this.resolveCollisions();
     this.camera.position.copy(this.collider.end);
+    this.movementState.horizontalSpeed = Math.hypot(
+      this.velocity.x,
+      this.velocity.z,
+    );
+    this.movementState.normalizedSpeed = Math.min(
+      1,
+      this.movementState.horizontalSpeed /
+        GAME_CONFIG.player.presentation.moveSpeedForFullBob,
+    );
+    this.movementState.onFloor = this.onFloor;
   }
 
   resolveCollisions() {
@@ -122,5 +137,9 @@ export class PlayerController {
     }
 
     this.spawn();
+  }
+
+  getMovementState() {
+    return this.movementState;
   }
 }

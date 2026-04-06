@@ -36,6 +36,9 @@ export const GAME_CONFIG = {
       yawJitter: 0.006,
       yawRecovery: 14,
     },
+    presentation: {
+      moveSpeedForFullBob: 8,
+    },
   },
   targets: {
     items: [
@@ -45,6 +48,11 @@ export const GAME_CONFIG = {
     ],
     maxHealth: 100,
     respawnDelay: 1.2,
+    flinch: {
+      scaleKick: 0.12,
+      tiltKick: 0.12,
+      recovery: 10,
+    },
   },
   simulation: {
     gravity: 30,
@@ -76,6 +84,29 @@ export const GAME_CONFIG = {
     recoilStrength: 0.035,
     rotation: [0, Math.PI / 2, 0],
     scale: [0.08, 0.08, 0.08],
+    idleSway: {
+      positionX: 0.012,
+      positionY: 0.01,
+      roll: 0.012,
+      speed: 1.8,
+      yaw: 0.01,
+    },
+    walkBob: {
+      pitch: 0.018,
+      positionX: 0.018,
+      positionY: 0.016,
+      roll: 0.028,
+      speed: 9.5,
+    },
+  },
+  ui: {
+    crosshair: {
+      baseScale: 1,
+      fireScale: 0.4,
+      moveScale: 0.5,
+      reloadScale: 0.9,
+      smoothing: 14,
+    },
   },
   fx: {
     impactLifetime: 0.16,

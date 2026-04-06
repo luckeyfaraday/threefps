@@ -11,17 +11,18 @@ export class WeaponAudio {
     this.reload.volume = 0.42;
   }
 
-  playShoot() {
-    this.play(this.shoot);
+  playShoot(playbackRate = 1) {
+    this.play(this.shoot, playbackRate);
   }
 
-  playReload() {
-    this.play(this.reload);
+  playReload(playbackRate = 1) {
+    this.play(this.reload, playbackRate);
   }
 
-  play(audio) {
+  play(audio, playbackRate) {
     audio.pause();
     audio.currentTime = 0;
+    audio.playbackRate = playbackRate;
     audio.play().catch(() => {});
   }
 }

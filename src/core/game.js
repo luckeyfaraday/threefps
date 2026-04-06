@@ -107,9 +107,17 @@ export class Game {
       this.player.step(substepDeltaTime);
     }
 
+    const movementState = this.player.getMovementState();
     this.weapon.update(clampedDeltaTime);
     this.targets.update(clampedDeltaTime);
-    this.viewModel.update(clampedDeltaTime);
+    this.viewModel.update(clampedDeltaTime, movementState);
+    this.hud.updateCrosshair(
+      {
+        movement: movementState.normalizedSpeed,
+        ...this.weapon.getPresentationState(),
+      },
+      clampedDeltaTime,
+    );
     this.impactEffects.update(clampedDeltaTime);
 
     this.sceneKit.renderer.render(this.sceneKit.scene, this.sceneKit.camera);

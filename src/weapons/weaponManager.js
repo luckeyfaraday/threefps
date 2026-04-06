@@ -1,4 +1,5 @@
 import { GAME_CONFIG } from "../core/config.js";
+import { WEAPON_ORDER } from "./weaponData.js";
 import { fireHitscan } from "./hitscan.js";
 
 export class WeaponManager {
@@ -23,16 +24,25 @@ export class WeaponManager {
     this.viewModel = viewModel;
     this.world = world;
 
-    this.ammoInMag = GAME_CONFIG.weapon.magSize;
-    this.reserveAmmo = GAME_CONFIG.weapon.reserveAmmo;
+    this.weapons = WEAPON_ORDER.map((weapon) => ({
+      ...weapon,
+      state: {
+        ammoInMag: weapon.magSize,
+        reserveAmmo: weapon.reserveAmmo,
+      },
+    }));
+    this.currentWeapon = this.weapons[0];
     this.cooldown = 0;
     this.reloadTimer = 0;
     this.isReloading = false;
+    this.fireFeedback = 0;
 
+    this.viewModel.setWeaponProfile(this.currentWeapon.viewModel);
     this.syncHud();
   }
 
   update(deltaTime) {
+    this.fireFeedback = Math.max(0, this.fireFeedback - deltaTime * 8);
     this.cooldown = Math.max(0, this.cooldown - deltaTime);
 
     if (this.isReloading) {
@@ -45,6 +55,12 @@ export class WeaponManager {
 
     if (this.input.consumePressed("KeyR")) {
       this.startReload();
+    }
+
+    for (const weapon of this.weapons) {
+      if (this.input.consumePressed(weapon.slot)) {
+        this.switchWeapon(weapon.id);
+      }
     }
 
     if (this.input.isLocked() && this.input.isPressed("MousePrimary")) {
@@ -63,13 +79,13 @@ export class WeaponManager {
     }
 
     this.ammoInMag -= 1;
-    this.cooldown = GAME_CONFIG.weapon.fireInterval;
-    this.viewModel.playShoot();
-    this.audio.playShoot();
+    this.cooldown = this.currentWeapon.fireInterval;
+    this.fireFeedback = 1;
+    this.viewModel.playShoot(this.currentWeapon.viewModel.shootAnimationDuration);
+    this.audio.playShoot(this.currentWeapon.audio.shootRate);
     this.cameraRig.applyRecoil({
-      pitch: GAME_CONFIG.player.recoil.pitchStep,
-      yaw:
-        (Math.random() - 0.5) * GAME_CONFIG.player.recoil.yawJitter * 2,
+      pitch: this.currentWeapon.recoil.pitchStep,
+      yaw: (Math.random() - 0.5) * this.currentWeapon.recoil.yawJitter * 2,
     });
 
     const result = fireHitscan(this.camera, [
@@ -79,7 +95,7 @@ export class WeaponManager {
 
     if (result.hit) {
       const damageResult = result.damageable
-        ? result.damageable.applyDamage(GAME_CONFIG.weapon.damage)
+        ? result.damageable.applyDamage(this.currentWeapon.damage)
         : null;
 
       this.impactEffects.spawn(result.point, {
@@ -107,19 +123,19 @@ export class WeaponManager {
       return;
     }
 
-    if (this.ammoInMag === GAME_CONFIG.weapon.magSize || this.reserveAmmo <= 0) {
+    if (this.ammoInMag === this.currentWeapon.magSize || this.reserveAmmo <= 0) {
       this.syncHud();
       return;
     }
 
     this.isReloading = true;
-    this.reloadTimer = this.viewModel.playReload();
-    this.audio.playReload();
+    this.reloadTimer = this.viewModel.playReload(this.currentWeapon.reloadDuration);
+    this.audio.playReload(this.currentWeapon.audio.reloadRate);
     this.syncHud("reloading");
   }
 
   finishReload() {
-    const missingAmmo = GAME_CONFIG.weapon.magSize - this.ammoInMag;
+    const missingAmmo = this.currentWeapon.magSize - this.ammoInMag;
     const ammoToLoad = Math.min(missingAmmo, this.reserveAmmo);
 
     this.ammoInMag += ammoToLoad;
@@ -130,6 +146,50 @@ export class WeaponManager {
   }
 
   syncHud(state = "") {
-    this.hud.setAmmo(this.ammoInMag, this.reserveAmmo, state);
+    this.hud.setAmmo(
+      this.ammoInMag,
+      this.reserveAmmo,
+      state,
+      this.currentWeapon.label,
+    );
+  }
+
+  getPresentationState() {
+    return {
+      firing: this.fireFeedback,
+      reloading: this.isReloading,
+    };
+  }
+
+  switchWeapon(weaponId) {
+    const nextWeapon = this.weapons.find((weapon) => weapon.id === weaponId);
+
+    if (!nextWeapon || nextWeapon.id === this.currentWeapon.id) {
+      return;
+    }
+
+    this.currentWeapon = nextWeapon;
+    this.isReloading = false;
+    this.reloadTimer = 0;
+    this.cooldown = Math.min(this.cooldown, this.currentWeapon.fireInterval);
+    this.viewModel.setWeaponProfile(this.currentWeapon.viewModel);
+    this.viewModel.playIdle();
+    this.syncHud();
+  }
+
+  get ammoInMag() {
+    return this.currentWeapon.state.ammoInMag;
+  }
+
+  set ammoInMag(value) {
+    this.currentWeapon.state.ammoInMag = value;
+  }
+
+  get reserveAmmo() {
+    return this.currentWeapon.state.reserveAmmo;
+  }
+
+  set reserveAmmo(value) {
+    this.currentWeapon.state.reserveAmmo = value;
   }
 }

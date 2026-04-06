@@ -8,6 +8,8 @@ class Target {
     this.health = this.maxHealth;
     this.respawnTimer = 0;
     this.baseY = mesh.position.y;
+    this.flinchRotation = 0;
+    this.flinchScale = 0;
 
     mesh.userData.damageable = this;
   }
@@ -20,6 +22,11 @@ class Target {
     this.health = Math.max(0, this.health - amount);
     this.mesh.material.emissive.setHex(0xffffff);
     this.mesh.material.color.setHex(0xffd166);
+    this.flinchRotation += (Math.random() - 0.5) * GAME_CONFIG.targets.flinch.tiltKick * 2;
+    this.flinchScale = Math.max(
+      this.flinchScale,
+      GAME_CONFIG.targets.flinch.scaleKick,
+    );
 
     if (this.health === 0) {
       this.mesh.visible = false;
@@ -34,6 +41,18 @@ class Target {
   update(deltaTime) {
     this.mesh.material.emissive.lerp(new THREE.Color(0x000000), 0.18);
     this.mesh.material.color.lerp(new THREE.Color(0xff6b4a), 0.12);
+    this.flinchRotation = THREE.MathUtils.damp(
+      this.flinchRotation,
+      0,
+      GAME_CONFIG.targets.flinch.recovery,
+      deltaTime,
+    );
+    this.flinchScale = THREE.MathUtils.damp(
+      this.flinchScale,
+      0,
+      GAME_CONFIG.targets.flinch.recovery,
+      deltaTime,
+    );
 
     if (this.respawnTimer > 0) {
       this.respawnTimer = Math.max(0, this.respawnTimer - deltaTime);
@@ -49,6 +68,12 @@ class Target {
 
     this.mesh.position.y =
       this.baseY + Math.sin(performance.now() * 0.0018 + this.baseY) * 0.05;
+    this.mesh.rotation.z = this.flinchRotation;
+    this.mesh.scale.set(
+      1 + this.flinchScale,
+      1 - this.flinchScale * 0.35,
+      1 - this.flinchScale * 0.25,
+    );
   }
 }
 
