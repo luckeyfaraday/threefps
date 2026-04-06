@@ -7,6 +7,7 @@ import { PlayerState } from "../player/playerState.js";
 import { ViewModel } from "../player/viewModel.js";
 import { ZombieManager } from "../actors/zombieManager.js";
 import { WeaponAudio } from "../audio/weaponAudio.js";
+import { FootstepAudio } from "../audio/footstepAudio.js";
 import { ImpactEffects } from "../fx/impactEffects.js";
 import { WeaponManager } from "../weapons/weaponManager.js";
 import { WEAPON_ORDER } from "../weapons/weaponData.js";
@@ -29,6 +30,7 @@ export class Game {
     this.viewModel = new ViewModel(this.sceneKit.camera);
     this.zombies = new ZombieManager(this.sceneKit.scene, this.world);
     this.weaponAudio = new WeaponAudio();
+    this.footstepAudio = new FootstepAudio();
     this.impactEffects = new ImpactEffects(this.sceneKit.scene);
     this.loop = new GameLoop(this.onFrame);
 
@@ -173,6 +175,7 @@ export class Game {
     if (simulationActive) {
       this.weapon.update(clampedDeltaTime);
     }
+    this.footstepAudio.update(clampedDeltaTime, movementState);
     const survivalState =
       this.gameOver || !this.runStarted || !this.input.isLocked()
         ? this.zombies.getStatus()

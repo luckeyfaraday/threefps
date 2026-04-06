@@ -123,6 +123,13 @@ export const GAME_CONFIG = {
     baseWaveCount: 4,
     perWaveIncrease: 2,
     spawnInterval: 0.65,
+    pressureRecovery: {
+      maxPlayerDistance: 55,
+      minSpawnDistance: 8,
+      stuckDistanceEpsilon: 0.05,
+      stuckTimeout: 6,
+      stuckRecoveryDistance: 18,
+    },
     routeAssist: {
       verticalThreshold: 1.35,
       nodes: [

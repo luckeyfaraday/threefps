@@ -19,6 +19,11 @@ const candidateStep = new THREE.Vector3();
 const toPlayerVector = new THREE.Vector3();
 const black = new THREE.Color(0x000000);
 const routeTargetVector = new THREE.Vector3();
+const steerProbeOrigin = new THREE.Vector3();
+const steerProbeDir = new THREE.Vector3();
+const steerResult = new THREE.Vector3();
+const steerForce = new THREE.Vector3();
+const probeHits = [];
 
 function findNearestRouteNode(position) {
   const nodes = GAME_CONFIG.survival.routeAssist?.nodes ?? [];
@@ -125,6 +130,9 @@ class Zombie {
     this.transientTimer = 0;
     this.transientFallback = null;
     this.currentLoop = null;
+    this.noSightTimer = 0;
+    this.stuckTimer = 0;
+    this.lastFootPosition = new THREE.Vector3(spawnPoint[0], spawnPoint[1], spawnPoint[2]);
     this.velocity = new THREE.Vector3();
     this.correction = new THREE.Vector3();
     this.onFloor = false;
@@ -334,6 +342,27 @@ class Zombie {
 
     this.fadeHitFlash();
 
+    const planarStep = Math.hypot(
+      this.collider.start.x - this.lastFootPosition.x,
+      this.collider.start.z - this.lastFootPosition.z,
+    );
+    const recoveryConfig = GAME_CONFIG.survival.pressureRecovery;
+    this.noSightTimer =
+      !hasSight && distance > this.profile.attackRange * 1.5
+        ? this.noSightTimer + deltaTime
+        : 0;
+    this.stuckTimer =
+      wantsMove &&
+      distance > this.profile.attackRange * 1.5 &&
+      planarStep < recoveryConfig.stuckDistanceEpsilon
+        ? this.stuckTimer + deltaTime
+        : 0;
+    this.lastFootPosition.set(
+      this.collider.start.x,
+      this.getFootY(),
+      this.collider.start.z,
+    );
+
     if (attackNow) {
       this.attackTimer = this.profile.attackCooldown;
       this.playTransient(
@@ -349,6 +378,50 @@ class Zombie {
     }
 
     return { damage: 0, removable: false };
+  }
+
+  needsPressureRecovery(playerPosition) {
+    if (this.dead) {
+      return false;
+    }
+
+    const config = GAME_CONFIG.survival.pressureRecovery;
+    const planarDistance = Math.hypot(
+      playerPosition.x - this.collider.start.x,
+      playerPosition.z - this.collider.start.z,
+    );
+    const isFarAway = planarDistance > config.maxPlayerDistance;
+    const isFarAndStuck =
+      planarDistance > config.stuckRecoveryDistance &&
+      this.stuckTimer >= config.stuckTimeout;
+
+    return (
+      this.getFootY() < GAME_CONFIG.player.oobY ||
+      isFarAway ||
+      isFarAndStuck
+    );
+  }
+
+  relocate(spawnPoint) {
+    this.collider.start.set(
+      spawnPoint[0],
+      spawnPoint[1] + this.profile.radius,
+      spawnPoint[2],
+    );
+    this.collider.end.set(
+      spawnPoint[0],
+      spawnPoint[1] + this.profile.radius + this.segmentHeight,
+      spawnPoint[2],
+    );
+    this.velocity.set(0, 0, 0);
+    this.noSightTimer = 0;
+    this.stuckTimer = 0;
+    this.lastFootPosition.set(spawnPoint[0], spawnPoint[1], spawnPoint[2]);
+    this.group.position.set(
+      this.collider.start.x,
+      this.getFootY(),
+      this.collider.start.z,
+    );
   }
 
   updateMovement(targetDirection, deltaTime, collisionWorld) {
@@ -392,45 +465,59 @@ class Zombie {
   }
 
   chooseMoveDirection(targetDirection, deltaTime, collisionWorld) {
-    const stepDistance = Math.max(0.05, this.profile.speed * deltaTime * 1.5);
-    let bestDirection = null;
-    let bestPenalty = Number.POSITIVE_INFINITY;
+    if (targetDirection.lengthSq() === 0) {
+      return new THREE.Vector3();
+    }
 
-    for (const angle of DETOUR_ANGLES) {
-      candidateDirection.copy(targetDirection);
-      if (candidateDirection.lengthSq() === 0) {
-        continue;
-      }
+    const seek = targetDirection.clone().normalize();
+    const probeCount = 7;
+    const spreadAngle = Math.PI * 0.5;
+    const rayLength = 2.5;
+    const probeOrigin = this.collider.start.clone();
+    probeOrigin.y = this.getFootY() + this.profile.eyeHeight * 0.75;
 
-      if (angle !== 0) {
-        candidateDirection.applyAxisAngle(UP, angle);
-      }
+    steerResult.set(0, 0, 0);
+    probeHits.length = 0;
 
-      candidateStep.copy(candidateDirection).multiplyScalar(stepDistance);
-      const probeCapsule = this.collider.clone();
-      probeCapsule.translate(candidateStep);
+    for (let i = 0; i < probeCount; i++) {
+      const angle = -spreadAngle / 2 + (spreadAngle / (probeCount - 1)) * i;
+      steerProbeDir.copy(seek).applyAxisAngle(UP, angle);
 
-      const hit = collisionWorld.capsuleIntersect(probeCapsule);
-      const penalty = (hit ? hit.depth + 2 : 0) + Math.abs(angle) * 0.12;
+      steerProbeOrigin.copy(probeOrigin);
+      const ray = new THREE.Raycaster(steerProbeOrigin, steerProbeDir, 0.05, rayLength);
+      const hits = ray.intersectObjects(collisionWorld.getShootables(), true);
 
-      if (penalty < bestPenalty) {
-        bestPenalty = penalty;
-        if (!bestDirection) {
-          bestDirection = new THREE.Vector3();
+      if (hits.length > 0) {
+        const hit = hits[0];
+        const penetration = rayLength - hit.distance;
+        if (penetration > 0) {
+          probeHits.push({ angle, penetration, dir: steerProbeDir.clone() });
         }
-        bestDirection.copy(candidateDirection);
-      }
-
-      if (!hit) {
-        break;
       }
     }
 
-    if (!bestDirection) {
-      return candidateDirection.copy(targetDirection).normalize();
+    if (probeHits.length === 0) {
+      return seek;
     }
 
-    return bestDirection.normalize();
+    steerForce.set(0, 0, 0);
+
+    for (const hit of probeHits) {
+      const weight = hit.penetration * 3;
+      steerForce.add(hit.dir.clone().multiplyScalar(-weight));
+    }
+
+    const perpendicular = new THREE.Vector3().crossVectors(UP, seek).normalize();
+    for (const hit of probeHits) {
+      const lateral = Math.sign(hit.dir.dot(perpendicular));
+      steerForce.add(perpendicular.clone().multiplyScalar(lateral * hit.penetration * 1.5));
+    }
+
+    steerResult.copy(seek).add(steerForce);
+    if (steerResult.lengthSq() < 0.001) {
+      return seek;
+    }
+    return steerResult.normalize();
   }
 
   resolveCollisions(collisionWorld) {
@@ -669,6 +756,10 @@ export class ZombieManager {
       const result = zombie.update(deltaTime, playerPosition, this.collisionWorld);
       damageToPlayer += result.damage;
 
+      if (zombie.needsPressureRecovery(playerPosition)) {
+        zombie.relocate(this.findRecoveryPoint(playerPosition, zombie.profile));
+      }
+
       if (!result.removable) {
         continue;
       }
@@ -729,5 +820,53 @@ export class ZombieManager {
     }
 
     return [basePoint[0], hit.point.y, basePoint[2]];
+  }
+
+  findRecoveryPoint(playerPosition, profile) {
+    const minDistance = GAME_CONFIG.survival.pressureRecovery.minSpawnDistance;
+    const candidates = [];
+
+    for (const node of GAME_CONFIG.survival.routeAssist?.nodes ?? []) {
+      const planarDistance = Math.hypot(
+        playerPosition.x - node.position[0],
+        playerPosition.z - node.position[2],
+      );
+
+      if (planarDistance < minDistance) {
+        continue;
+      }
+
+      candidates.push(node.position);
+    }
+
+    for (const point of GAME_CONFIG.survival.spawnPoints) {
+      const planarDistance = Math.hypot(
+        playerPosition.x - point[0],
+        playerPosition.z - point[2],
+      );
+
+      if (planarDistance < minDistance) {
+        continue;
+      }
+
+      candidates.push(point);
+    }
+
+    const fallback = candidates[0] ?? [playerPosition.x, playerPosition.y, playerPosition.z - 10];
+    let bestPoint = fallback;
+    let bestScore = Number.POSITIVE_INFINITY;
+
+    for (const point of candidates) {
+      const score =
+        Math.abs(point[1] - playerPosition.y) * 3 +
+        Math.hypot(playerPosition.x - point[0], playerPosition.z - point[2]);
+
+      if (score < bestScore) {
+        bestScore = score;
+        bestPoint = point;
+      }
+    }
+
+    return this.resolveSpawnPoint(bestPoint, profile);
   }
 }
