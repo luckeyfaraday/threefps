@@ -1,0 +1,219 @@
+:root {
+  color-scheme: only light;
+  font-family: "Avenir Next", "Trebuchet MS", "Gill Sans", sans-serif;
+  line-height: 1.4;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background:
+    radial-gradient(circle at top, rgba(236, 247, 255, 0.95), transparent 40%),
+    linear-gradient(180deg, #eff6fb 0%, #d7e6ef 100%);
+  color: #10222d;
+}
+
+.viewport,
+.viewport canvas {
+  display: block;
+  height: 100%;
+  width: 100%;
+}
+
+.hud {
+  inset: 0;
+  pointer-events: none;
+  position: fixed;
+}
+
+.hud__panel {
+  background: linear-gradient(160deg, rgba(7, 31, 46, 0.88), rgba(15, 57, 69, 0.7));
+  border: 1px solid rgba(203, 241, 255, 0.35);
+  border-radius: 20px;
+  box-shadow: 0 24px 80px rgba(5, 20, 31, 0.35);
+  color: #ecfbff;
+  left: 24px;
+  max-width: 360px;
+  padding: 20px 20px 18px;
+  position: absolute;
+  top: 24px;
+}
+
+.hud__eyebrow {
+  font-family: "Iowan Old Style", "Palatino Linotype", serif;
+  font-size: 0.82rem;
+  letter-spacing: 0.18em;
+  margin: 0 0 8px;
+  text-transform: uppercase;
+}
+
+.hud__title {
+  font-size: clamp(2rem, 4vw, 3rem);
+  line-height: 0.95;
+  margin: 0 0 12px;
+}
+
+.hud__status {
+  margin: 0 0 16px;
+  max-width: 28ch;
+}
+
+.hud__button {
+  background: linear-gradient(180deg, #c9f2ff 0%, #8bd8f4 100%);
+  border: 0;
+  border-radius: 999px;
+  color: #06202d;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 12px 18px;
+  pointer-events: auto;
+  text-transform: uppercase;
+}
+
+.hud__button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.hud__tips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.hud__tips span {
+  background: rgba(210, 245, 255, 0.12);
+  border: 1px solid rgba(210, 245, 255, 0.16);
+  border-radius: 999px;
+  font-size: 0.78rem;
+  padding: 6px 10px;
+}
+
+.crosshair {
+  border: 2px solid rgba(241, 251, 255, 0.9);
+  border-radius: 999px;
+  box-shadow: 0 0 24px rgba(241, 251, 255, 0.45);
+  height: 16px;
+  left: 50%;
+  opacity: 0;
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  transition: opacity 120ms ease;
+  width: 16px;
+}
+
+.hit-marker {
+  height: 28px;
+  left: 50%;
+  opacity: 0;
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  transition: opacity 70ms ease;
+  width: 28px;
+}
+
+.hit-marker::before,
+.hit-marker::after {
+  background: rgba(255, 242, 219, 0.95);
+  content: "";
+  height: 2px;
+  left: 50%;
+  position: absolute;
+  top: 50%;
+  width: 100%;
+}
+
+.hit-marker::before {
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.hit-marker::after {
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
+
+.hit-marker.is-visible {
+  opacity: 1;
+}
+
+.hit-marker.is-kill::before,
+.hit-marker.is-kill::after {
+  background: rgba(255, 88, 124, 0.98);
+  height: 3px;
+}
+
+.ammo {
+  align-items: baseline;
+  background: rgba(7, 31, 46, 0.84);
+  border: 1px solid rgba(203, 241, 255, 0.24);
+  border-radius: 16px;
+  bottom: 24px;
+  color: #f2fcff;
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px;
+  pointer-events: none;
+  position: absolute;
+  right: 24px;
+}
+
+.ammo__label,
+.ammo__state {
+  color: rgba(222, 245, 255, 0.72);
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ammo__current,
+.ammo__reserve,
+.ammo__divider {
+  font-size: 2rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.ammo__state {
+  min-width: 7ch;
+}
+
+.hud.is-locked .hud__panel {
+  opacity: 0.2;
+}
+
+.hud.is-locked .crosshair {
+  opacity: 1;
+}
+
+.hud.is-error .hud__panel {
+  background: linear-gradient(160deg, rgba(61, 17, 14, 0.95), rgba(102, 29, 22, 0.82));
+}
+
+@media (max-width: 720px) {
+  .hud__panel {
+    left: 16px;
+    max-width: calc(100vw - 32px);
+    right: 16px;
+    top: 16px;
+  }
+
+  .ammo {
+    bottom: 16px;
+    left: 16px;
+    right: auto;
+  }
+}

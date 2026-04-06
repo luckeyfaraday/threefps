@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>threefps</title>
+    <link rel="stylesheet" href="./src/styles/main.css" />
+  </head>
+  <body>
+    <div id="app">
+      <div id="viewport" class="viewport"></div>
+
+      <div id="hud" class="hud">
+        <div class="hud__panel">
+          <p class="hud__eyebrow">threefps / phase 1</p>
+          <h1 class="hud__title">Movement Foundation</h1>
+          <p id="hud-status" class="hud__status">Loading collision world...</p>
+          <button id="lock-button" class="hud__button" type="button" disabled>
+            Enter Simulation
+          </button>
+          <div class="hud__tips">
+            <span>`WASD` move</span>
+            <span>`SPACE` jump</span>
+            <span>mouse look</span>
+            <span>left click fire</span>
+            <span>`R` reload</span>
+          </div>
+        </div>
+
+        <div class="ammo">
+          <span class="ammo__label">Ammo</span>
+          <span id="ammo-current" class="ammo__current">00</span>
+          <span class="ammo__divider">/</span>
+          <span id="ammo-reserve" class="ammo__reserve">00</span>
+          <span id="ammo-state" class="ammo__state"></span>
+        </div>
+
+        <div class="crosshair" aria-hidden="true"></div>
+        <div id="hit-marker" class="hit-marker" aria-hidden="true"></div>
+      </div>
+    </div>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./build/three.module.js",
+          "three/addons/": "./examples/jsm/"
+        }
+      }
+    </script>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
