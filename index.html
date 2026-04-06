@@ -15,8 +15,8 @@
 
       <div id="hud" class="hud">
         <div class="hud__panel">
-          <p class="hud__eyebrow">threefps / phase 1</p>
-          <h1 class="hud__title">Movement Foundation</h1>
+          <p class="hud__eyebrow">threefps / survival prototype</p>
+          <h1 class="hud__title">Zombie Run</h1>
           <p id="hud-status" class="hud__status">Loading collision world...</p>
           <button id="lock-button" class="hud__button" type="button" disabled>
             Enter Simulation
@@ -27,7 +27,7 @@
             <span>mouse look</span>
             <span>left click fire</span>
             <span>`R` reload</span>
-            <span>`1` / `2` swap</span>
+            <span>`1` / `2` / `3` swap</span>
           </div>
         </div>
 
@@ -37,6 +37,35 @@
           <span class="ammo__divider">/</span>
           <span id="ammo-reserve" class="ammo__reserve">00</span>
           <span id="ammo-state" class="ammo__state"></span>
+        </div>
+
+        <div class="survival">
+          <div class="survival__stat">
+            <span class="survival__label">Wave</span>
+            <span id="survival-wave" class="survival__value">0</span>
+          </div>
+          <div class="survival__stat">
+            <span class="survival__label">Health</span>
+            <span id="survival-health" class="survival__value">100</span>
+          </div>
+          <div class="survival__stat">
+            <span class="survival__label">Kills</span>
+            <span id="survival-kills" class="survival__value">0</span>
+          </div>
+          <div class="survival__stat">
+            <span class="survival__label">Alive</span>
+            <span id="survival-alive" class="survival__value">0</span>
+          </div>
+          <p id="survival-status" class="survival__status">Intermission</p>
+        </div>
+
+        <div id="damage-vignette" class="damage-vignette" aria-hidden="true"></div>
+        <div id="death-overlay" class="death-overlay" aria-hidden="true">
+          <p class="death-overlay__eyebrow">Run Over</p>
+          <h2 class="death-overlay__title">Overrun</h2>
+          <p id="death-overlay-summary" class="death-overlay__summary">
+            Restart to try another run.
+          </p>
         </div>
 
         <div class="crosshair" aria-hidden="true"></div>

@@ -34,6 +34,10 @@ export class CollisionWorld {
     return this.octree.capsuleIntersect(capsule);
   }
 
+  sphereIntersect(sphere) {
+    return this.octree.sphereIntersect(sphere);
+  }
+
   getShootables() {
     return this.shootables;
   }

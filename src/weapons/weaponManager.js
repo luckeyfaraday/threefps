@@ -38,11 +38,35 @@ export class WeaponManager {
     this.fireFeedback = 0;
 
     this.viewModel.setWeaponProfile(this.currentWeapon.viewModel);
+    this.cameraRig.setRecoilProfile(this.currentWeapon.recoil);
+    this.syncHud();
+  }
+
+  resetRun() {
+    this.weapons = WEAPON_ORDER.map((weapon) => ({
+      ...weapon,
+      state: {
+        ammoInMag: weapon.magSize,
+        reserveAmmo: weapon.reserveAmmo,
+      },
+    }));
+    this.currentWeapon = this.weapons[0];
+    this.cooldown = 0;
+    this.reloadTimer = 0;
+    this.isReloading = false;
+    this.fireFeedback = 0;
+    this.viewModel.setWeaponProfile(this.currentWeapon.viewModel);
+    this.cameraRig.setRecoilProfile(this.currentWeapon.recoil);
+    this.viewModel.playIdle();
     this.syncHud();
   }
 
   update(deltaTime) {
-    this.fireFeedback = Math.max(0, this.fireFeedback - deltaTime * 8);
+    const crosshairProfile = this.currentWeapon.ui.crosshair;
+    this.fireFeedback = Math.max(
+      0,
+      this.fireFeedback - deltaTime * crosshairProfile.smoothing * 0.55,
+    );
     this.cooldown = Math.max(0, this.cooldown - deltaTime);
 
     if (this.isReloading) {
@@ -97,6 +121,10 @@ export class WeaponManager {
       const damageResult = result.damageable
         ? result.damageable.applyDamage(this.currentWeapon.damage)
         : null;
+
+      if (damageResult?.killed && this.targets.registerKill) {
+        this.targets.registerKill(damageResult.score);
+      }
 
       this.impactEffects.spawn(result.point, {
         kill: damageResult?.killed === true,
@@ -158,6 +186,7 @@ export class WeaponManager {
     return {
       firing: this.fireFeedback,
       reloading: this.isReloading,
+      ...this.currentWeapon.ui.crosshair,
     };
   }
 
@@ -173,6 +202,7 @@ export class WeaponManager {
     this.reloadTimer = 0;
     this.cooldown = Math.min(this.cooldown, this.currentWeapon.fireInterval);
     this.viewModel.setWeaponProfile(this.currentWeapon.viewModel);
+    this.cameraRig.setRecoilProfile(this.currentWeapon.recoil);
     this.viewModel.playIdle();
     this.syncHud();
   }

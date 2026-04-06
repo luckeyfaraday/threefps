@@ -8,10 +8,19 @@ export class Hud {
     this.ammoCurrent = documentRef.getElementById("ammo-current");
     this.ammoReserve = documentRef.getElementById("ammo-reserve");
     this.ammoState = documentRef.getElementById("ammo-state");
+    this.waveValue = documentRef.getElementById("survival-wave");
+    this.healthValue = documentRef.getElementById("survival-health");
+    this.killsValue = documentRef.getElementById("survival-kills");
+    this.aliveValue = documentRef.getElementById("survival-alive");
+    this.survivalStatus = documentRef.getElementById("survival-status");
+    this.damageVignette = documentRef.getElementById("damage-vignette");
+    this.deathOverlay = documentRef.getElementById("death-overlay");
+    this.deathSummary = documentRef.getElementById("death-overlay-summary");
     this.crosshair = documentRef.querySelector(".crosshair");
     this.hitMarker = documentRef.getElementById("hit-marker");
     this.hitMarkerTimeout = null;
     this.crosshairScale = 1;
+    this.damageFlash = 0;
   }
 
   bindStart(handler) {
@@ -24,9 +33,18 @@ export class Hud {
 
   setReady() {
     this.button.disabled = false;
-    this.button.textContent = "Enter Simulation";
-    this.setStatus("Movement loop loaded. Click to capture the mouse.");
+    this.button.textContent = "Start Run";
+    this.setStatus("Wave sim loaded. Start the run when you're ready.");
     this.setAmmo(0, 0, "", "Weapon");
+    this.deathOverlay.classList.remove("is-visible");
+    this.damageVignette.classList.remove("is-dead");
+    this.setSurvival({
+      alive: 0,
+      health: 100,
+      kills: 0,
+      status: "Prepare",
+      wave: 0,
+    });
   }
 
   setLocked(locked) {
@@ -34,8 +52,8 @@ export class Hud {
     this.button.hidden = locked;
     this.setStatus(
       locked
-        ? "Pointer lock active. Move, jump, and test collision feel."
-        : "Pointer released. Click to re-enter the simulation.",
+        ? "Pointer lock active. Survive the wave."
+        : "Pointer released. Click to re-enter the run.",
     );
   }
 
@@ -43,6 +61,19 @@ export class Hud {
     this.root.classList.add("is-error");
     this.button.disabled = true;
     this.setStatus(message);
+  }
+
+  setGameOver() {
+    this.button.hidden = false;
+    this.button.disabled = false;
+    this.button.textContent = "Restart Run";
+    this.setStatus("You were overrun. Restart the run.");
+    this.deathOverlay.classList.add("is-visible");
+    this.damageVignette.classList.add("is-dead");
+  }
+
+  setGameOverSummary({ kills = 0, wave = 0 } = {}) {
+    this.deathSummary.textContent = `Made it to wave ${wave} with ${kills} kills.`;
   }
 
   setAmmo(current, reserve, state = "", weaponLabel = "Weapon") {
@@ -73,14 +104,46 @@ export class Hud {
     }, className === "is-kill" ? 140 : 90);
   }
 
-  updateCrosshair({ movement = 0, firing = 0, reloading = false } = {}, deltaTime) {
+  setSurvival({ alive, health, kills, status, wave }) {
+    this.waveValue.textContent = String(wave);
+    this.healthValue.textContent = String(health);
+    this.killsValue.textContent = String(kills);
+    this.aliveValue.textContent = String(alive);
+    this.survivalStatus.textContent = status;
+  }
+
+  pulseDamage(intensity = 0.2) {
+    this.damageFlash = Math.min(1, this.damageFlash + intensity);
+  }
+
+  update(deltaTime) {
+    this.damageFlash = Math.max(0, this.damageFlash - deltaTime * 1.8);
+    this.damageVignette.style.setProperty(
+      "--damage-opacity",
+      this.damageFlash.toFixed(3),
+    );
+  }
+
+  updateCrosshair(
+    {
+      movement = 0,
+      firing = 0,
+      reloading = false,
+      moveSpread = 0.5,
+      fireSpread = 0.4,
+      reloadSpread = 0.9,
+      smoothing = 14,
+    } = {},
+    deltaTime,
+  ) {
     const targetScale =
       1 +
-      movement * 0.5 +
-      firing * 0.4 +
-      (reloading ? 0.9 : 0);
-    const smoothing = 1 - Math.exp(-14 * deltaTime);
-    this.crosshairScale += (targetScale - this.crosshairScale) * smoothing;
+      movement * moveSpread +
+      firing * fireSpread +
+      (reloading ? reloadSpread : 0);
+    const smoothingFactor = 1 - Math.exp(-smoothing * deltaTime);
+    this.crosshairScale +=
+      (targetScale - this.crosshairScale) * smoothingFactor;
     this.crosshair.style.setProperty(
       "--crosshair-scale",
       this.crosshairScale.toFixed(3),

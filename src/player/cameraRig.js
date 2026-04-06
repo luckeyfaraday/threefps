@@ -11,6 +11,13 @@ export class CameraRig {
     this.yaw = 0;
     this.recoilPitch = 0;
     this.recoilYaw = 0;
+    this.damageKick = 0;
+    this.damageRoll = 0;
+    this.deathRoll = 0;
+    this.recoilProfile = {
+      pitchRecovery: GAME_CONFIG.player.recoil.pitchRecovery,
+      yawRecovery: GAME_CONFIG.player.recoil.yawRecovery,
+    };
   }
 
   update() {
@@ -30,9 +37,9 @@ export class CameraRig {
     );
 
     this.camera.rotation.set(
-      this.pitch + this.recoilPitch,
+      this.pitch + this.recoilPitch + this.damageKick,
       this.yaw + this.recoilYaw,
-      0,
+      this.damageRoll + this.deathRoll,
     );
     this.lookDelta.set(0, 0);
   }
@@ -41,15 +48,26 @@ export class CameraRig {
     this.recoilPitch = THREE.MathUtils.damp(
       this.recoilPitch,
       0,
-      GAME_CONFIG.player.recoil.pitchRecovery,
+      this.recoilProfile.pitchRecovery,
       deltaTime,
     );
     this.recoilYaw = THREE.MathUtils.damp(
       this.recoilYaw,
       0,
-      GAME_CONFIG.player.recoil.yawRecovery,
+      this.recoilProfile.yawRecovery,
       deltaTime,
     );
+    this.damageKick = THREE.MathUtils.damp(this.damageKick, 0, 12, deltaTime);
+    this.damageRoll = THREE.MathUtils.damp(this.damageRoll, 0, 10, deltaTime);
+    this.deathRoll = THREE.MathUtils.damp(this.deathRoll, 0, 4, deltaTime);
+  }
+
+  setRecoilProfile(profile = {}) {
+    this.recoilProfile = {
+      pitchRecovery:
+        profile.pitchRecovery ?? GAME_CONFIG.player.recoil.pitchRecovery,
+      yawRecovery: profile.yawRecovery ?? GAME_CONFIG.player.recoil.yawRecovery,
+    };
   }
 
   applyRecoil({ pitch, yaw }) {
@@ -57,11 +75,25 @@ export class CameraRig {
     this.recoilYaw += yaw;
   }
 
+  applyDamageFeedback(intensity = 1) {
+    this.damageKick += 0.03 * intensity;
+    this.damageRoll += (Math.random() - 0.5) * 0.08 * intensity;
+  }
+
+  triggerDeathEffect() {
+    this.damageKick = 0.12;
+    this.damageRoll = 0;
+    this.deathRoll = -0.42;
+  }
+
   setRotation({ pitch = 0, yaw = 0 } = {}) {
     this.pitch = pitch;
     this.yaw = yaw;
     this.recoilPitch = 0;
     this.recoilYaw = 0;
+    this.damageKick = 0;
+    this.damageRoll = 0;
+    this.deathRoll = 0;
     this.camera.rotation.set(this.pitch, this.yaw, 0);
   }
 
