@@ -42,6 +42,9 @@ export const GAME_CONFIG = {
     health: {
       max: 100,
     },
+    sounds: {
+      hurt: "./assets/sounds/player_hurt.mp3",
+    },
   },
   targets: {
     items: [
@@ -117,12 +120,31 @@ export const GAME_CONFIG = {
     killImpactScale: 0.16,
     shardsPerImpact: 5,
   },
+  pickups: {
+    collectionRadius: 1.15,
+    hoverHeight: 0.06,
+    hoverSpeed: 4.8,
+    spinSpeed: 2.6,
+    ammo: {
+      rifle: {
+        modelPath: "./assets/models/7.62x39mm.glb",
+        size: 0.22,
+      },
+      light: {
+        modelPath: "./assets/models/9x19mm.glb",
+        size: 0.16,
+      },
+    },
+  },
   survival: {
     initialDelay: 2.5,
     intermissionDuration: 7,
     baseWaveCount: 4,
     perWaveIncrease: 2,
     spawnInterval: 0.65,
+    navMesh: {
+      modelPath: "./collision-world-navmesh.glb",
+    },
     pressureRecovery: {
       maxPlayerDistance: 55,
       minSpawnDistance: 8,
@@ -168,6 +190,8 @@ export const GAME_CONFIG = {
       scale: 0.27,
       speed: 3.15,
       score: 10,
+      dropAmmoAmount: 6,
+      dropAmmoType: "rifle",
       eyeHeight: 1.1,
       sightRange: 35,
       hearingRange: 20,
@@ -195,6 +219,8 @@ export const GAME_CONFIG = {
       scale: 0.29,
       speed: 4.1,
       score: 18,
+      dropAmmoAmount: 10,
+      dropAmmoType: "light",
       eyeHeight: 1.08,
       sightRange: 40,
       hearingRange: 25,

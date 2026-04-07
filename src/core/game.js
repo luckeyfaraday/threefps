@@ -5,7 +5,9 @@ import { InputController } from "../player/input.js";
 import { PlayerController } from "../player/playerController.js";
 import { PlayerState } from "../player/playerState.js";
 import { ViewModel } from "../player/viewModel.js";
+import { AmmoPickupManager } from "../actors/ammoPickupManager.js";
 import { ZombieManager } from "../actors/zombieManager.js";
+import { PlayerAudio } from "../audio/playerAudio.js";
 import { WeaponAudio } from "../audio/weaponAudio.js";
 import { FootstepAudio } from "../audio/footstepAudio.js";
 import { ImpactEffects } from "../fx/impactEffects.js";
@@ -28,7 +30,9 @@ export class Game {
     );
     this.playerState = new PlayerState();
     this.viewModel = new ViewModel(this.sceneKit.camera);
+    this.ammoPickups = new AmmoPickupManager(this.sceneKit.scene);
     this.zombies = new ZombieManager(this.sceneKit.scene, this.world);
+    this.playerAudio = new PlayerAudio();
     this.weaponAudio = new WeaponAudio();
     this.footstepAudio = new FootstepAudio();
     this.impactEffects = new ImpactEffects(this.sceneKit.scene);
@@ -81,6 +85,7 @@ export class Game {
     await Promise.all([
       this.world.load(GAME_CONFIG.world.modelPath),
       this.viewModel.load(WEAPON_ORDER),
+      this.ammoPickups.load(),
       this.zombies.load(),
     ]);
 
@@ -91,6 +96,7 @@ export class Game {
       input: this.input,
     });
     this.weapon = new WeaponManager({
+      ammoPickups: this.ammoPickups,
       audio: this.weaponAudio,
       camera: this.sceneKit.camera,
       cameraRig: this.cameraRig,
@@ -126,6 +132,7 @@ export class Game {
     this.playerState.reset();
     this.player.spawn();
     this.weapon.resetRun();
+    this.ammoPickups.resetRun();
     this.zombies.resetRun();
     this.hud.button.textContent = "Start Run";
     this.hud.button.hidden = !this.input.isLocked();
@@ -175,6 +182,12 @@ export class Game {
     if (simulationActive) {
       this.weapon.update(clampedDeltaTime);
     }
+    this.ammoPickups.update(
+      clampedDeltaTime,
+      this.sceneKit.camera.position,
+      this.weapon,
+      simulationActive,
+    );
     this.footstepAudio.update(clampedDeltaTime, movementState);
     const survivalState =
       this.gameOver || !this.runStarted || !this.input.isLocked()
@@ -182,6 +195,9 @@ export class Game {
         : this.zombies.update(clampedDeltaTime, this.sceneKit.camera.position);
 
     if (simulationActive && survivalState.damageToPlayer > 0) {
+      this.playerAudio.playHurt(
+        Math.max(0.92, 1.08 - survivalState.damageToPlayer / 40),
+      );
       this.hud.pulseDamage(
         Math.min(1, survivalState.damageToPlayer / this.playerState.maxHealth),
       );

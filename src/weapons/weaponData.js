@@ -1,6 +1,7 @@
 export const WEAPON_DATA = {
   ak: {
     id: "ak",
+    ammoType: "rifle",
     label: "AK",
     slot: "Digit1",
     damage: 34,
@@ -39,6 +40,7 @@ export const WEAPON_DATA = {
   },
   smg: {
     id: "smg",
+    ammoType: "light",
     label: "SMG",
     slot: "Digit2",
     damage: 24,
@@ -81,6 +83,7 @@ export const WEAPON_DATA = {
   },
   handgun: {
     id: "handgun",
+    ammoType: "light",
     label: "Handgun",
     slot: "Digit3",
     damage: 46,
@@ -115,6 +118,52 @@ export const WEAPON_DATA = {
       muzzleFlashColor: 0xffc27a,
       muzzleFlashDuration: 0.065,
       muzzleFlashIntensity: 4.2,
+    },
+  },
+  knife: {
+    id: "knife",
+    ammoType: null,
+    label: "Knife",
+    slot: "Digit4",
+    usesAmmo: false,
+    damage: 70,
+    range: 2.1,
+    fireInterval: 0.52,
+    magSize: 0,
+    reserveAmmo: 0,
+    reloadDuration: 0,
+    recoil: {
+      pitchStep: 0.008,
+      yawJitter: 0.002,
+      pitchRecovery: 18,
+      yawRecovery: 16,
+    },
+    audio: {
+      reloadRate: null,
+      shootRate: null,
+    },
+    ui: {
+      crosshair: {
+        moveSpread: 0.28,
+        fireSpread: 0.18,
+        reloadSpread: 0,
+        smoothing: 16,
+      },
+    },
+    viewModel: {
+      rigModelPath: "./fps_arms_knife_stab.glb",
+      rigScale: [0.08, 0.08, 0.08],
+      rigRotation: [0, Math.PI / 2, 0],
+      holderPosition: [0.12, -0.2, -0.2],
+      recoilStrength: 0.012,
+      recoilRecovery: 18,
+      shootAnimation: "KnifeStab",
+      shootAnimationDuration: 0.38,
+      idleAnimation: null,
+      reloadAnimation: null,
+      muzzleFlashColor: 0xffffff,
+      muzzleFlashDuration: 0,
+      muzzleFlashIntensity: 0,
     },
   },
 };

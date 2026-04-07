@@ -20,11 +20,15 @@ function findDamageable(object) {
 }
 
 export function fireHitscan(camera, targets) {
+  return fireHitscanWithRange(camera, targets, GAME_CONFIG.weapon.range);
+}
+
+export function fireHitscanWithRange(camera, targets, range = GAME_CONFIG.weapon.range) {
   camera.getWorldPosition(origin);
   camera.getWorldDirection(direction);
 
   raycaster.set(origin, direction);
-  raycaster.far = GAME_CONFIG.weapon.range;
+  raycaster.far = range;
 
   const intersections = raycaster.intersectObjects(targets, true);
   const hit = intersections[0];

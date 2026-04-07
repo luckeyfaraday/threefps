@@ -78,8 +78,10 @@ export class Hud {
 
   setAmmo(current, reserve, state = "", weaponLabel = "Weapon") {
     this.weaponLabel.textContent = weaponLabel;
-    this.ammoCurrent.textContent = String(current).padStart(2, "0");
-    this.ammoReserve.textContent = String(reserve).padStart(2, "0");
+    this.ammoCurrent.textContent =
+      current == null ? "--" : String(current).padStart(2, "0");
+    this.ammoReserve.textContent =
+      reserve == null ? "--" : String(reserve).padStart(2, "0");
     this.ammoState.textContent = state;
   }
 

@@ -1,9 +1,10 @@
 import { GAME_CONFIG } from "../core/config.js";
 import { WEAPON_ORDER } from "./weaponData.js";
-import { fireHitscan } from "./hitscan.js";
+import { fireHitscanWithRange } from "./hitscan.js";
 
 export class WeaponManager {
   constructor({
+    ammoPickups,
     audio,
     camera,
     cameraRig,
@@ -14,6 +15,7 @@ export class WeaponManager {
     viewModel,
     world,
   }) {
+    this.ammoPickups = ammoPickups;
     this.audio = audio;
     this.camera = camera;
     this.cameraRig = cameraRig;
@@ -97,25 +99,29 @@ export class WeaponManager {
       return;
     }
 
-    if (this.ammoInMag <= 0) {
+    if (this.currentWeapon.usesAmmo !== false && this.ammoInMag <= 0) {
       this.startReload();
       return;
     }
 
-    this.ammoInMag -= 1;
+    if (this.currentWeapon.usesAmmo !== false) {
+      this.ammoInMag -= 1;
+    }
     this.cooldown = this.currentWeapon.fireInterval;
     this.fireFeedback = 1;
     this.viewModel.playShoot(this.currentWeapon.viewModel.shootAnimationDuration);
-    this.audio.playShoot(this.currentWeapon.audio.shootRate);
+    if (this.currentWeapon.audio?.shootRate != null) {
+      this.audio.playShoot(this.currentWeapon.audio.shootRate);
+    }
     this.cameraRig.applyRecoil({
       pitch: this.currentWeapon.recoil.pitchStep,
       yaw: (Math.random() - 0.5) * this.currentWeapon.recoil.yawJitter * 2,
     });
 
-    const result = fireHitscan(this.camera, [
+    const result = fireHitscanWithRange(this.camera, [
       ...this.targets.getShootables(),
       ...this.world.getShootables(),
-    ]);
+    ], this.currentWeapon.range ?? GAME_CONFIG.weapon.range);
 
     if (result.hit) {
       const damageResult = result.damageable
@@ -124,6 +130,14 @@ export class WeaponManager {
 
       if (damageResult?.killed && this.targets.registerKill) {
         this.targets.registerKill(damageResult.score);
+      }
+
+      if (damageResult?.killed && damageResult.drop) {
+        this.ammoPickups?.spawn(
+          damageResult.drop.ammoType,
+          damageResult.drop.amount,
+          damageResult.drop.position,
+        );
       }
 
       this.impactEffects.spawn(result.point, {
@@ -138,7 +152,11 @@ export class WeaponManager {
       }
     }
 
-    if (this.ammoInMag === 0 && this.reserveAmmo > 0) {
+    if (
+      this.currentWeapon.usesAmmo !== false &&
+      this.ammoInMag === 0 &&
+      this.reserveAmmo > 0
+    ) {
       this.startReload();
       return;
     }
@@ -151,6 +169,11 @@ export class WeaponManager {
       return;
     }
 
+    if (this.currentWeapon.usesAmmo === false) {
+      this.syncHud();
+      return;
+    }
+
     if (this.ammoInMag === this.currentWeapon.magSize || this.reserveAmmo <= 0) {
       this.syncHud();
       return;
@@ -158,7 +181,9 @@ export class WeaponManager {
 
     this.isReloading = true;
     this.reloadTimer = this.viewModel.playReload(this.currentWeapon.reloadDuration);
-    this.audio.playReload(this.currentWeapon.audio.reloadRate);
+    if (this.currentWeapon.audio?.reloadRate != null) {
+      this.audio.playReload(this.currentWeapon.audio.reloadRate);
+    }
     this.syncHud("reloading");
   }
 
@@ -174,9 +199,10 @@ export class WeaponManager {
   }
 
   syncHud(state = "") {
+    const usesAmmo = this.currentWeapon.usesAmmo !== false;
     this.hud.setAmmo(
-      this.ammoInMag,
-      this.reserveAmmo,
+      usesAmmo ? this.ammoInMag : null,
+      usesAmmo ? this.reserveAmmo : null,
       state,
       this.currentWeapon.label,
     );
@@ -205,6 +231,42 @@ export class WeaponManager {
     this.cameraRig.setRecoilProfile(this.currentWeapon.recoil);
     this.viewModel.playIdle();
     this.syncHud();
+  }
+
+  addAmmoByType(ammoType, amount) {
+    if (!ammoType || amount <= 0) {
+      return false;
+    }
+
+    const compatibleWeapons = this.weapons.filter(
+      (weapon) => weapon.ammoType === ammoType && weapon.usesAmmo !== false,
+    );
+    if (compatibleWeapons.length === 0) {
+      return false;
+    }
+
+    const baseShare = Math.floor(amount / compatibleWeapons.length);
+    let remainder = amount % compatibleWeapons.length;
+    let added = 0;
+
+    for (let index = 0; index < compatibleWeapons.length; index += 1) {
+      const share = baseShare + (remainder > 0 ? 1 : 0);
+      if (remainder > 0) {
+        remainder -= 1;
+      }
+      if (share <= 0) {
+        continue;
+      }
+      compatibleWeapons[index].state.reserveAmmo += share;
+      added += share;
+    }
+
+    if (added === 0) {
+      return false;
+    }
+
+    this.syncHud();
+    return true;
   }
 
   get ammoInMag() {

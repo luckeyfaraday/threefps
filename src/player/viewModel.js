@@ -28,9 +28,14 @@ export class ViewModel {
     this.walkCycle = 0;
     this.profile = {
       rigModelPath: GAME_CONFIG.viewModel.modelPath,
+      rigScale: [...GAME_CONFIG.viewModel.scale],
+      rigRotation: [...GAME_CONFIG.viewModel.rotation],
       holderPosition: [...GAME_CONFIG.viewModel.holderPosition],
+      idleAnimation: "Armature|Idle",
       recoilStrength: GAME_CONFIG.viewModel.recoilStrength,
       recoilRecovery: GAME_CONFIG.viewModel.recoilRecovery,
+      reloadAnimation: "Armature|Reload",
+      shootAnimation: "Armature|Shoot",
       shootAnimationDuration: 0.22,
       muzzleFlashColor: 0xffe7b6,
       muzzleFlashDuration: 0.05,
@@ -42,9 +47,14 @@ export class ViewModel {
     };
     this.defaultProfile = {
       rigModelPath: this.profile.rigModelPath,
+      rigScale: [...this.profile.rigScale],
+      rigRotation: [...this.profile.rigRotation],
       holderPosition: [...this.profile.holderPosition],
+      idleAnimation: this.profile.idleAnimation,
       recoilStrength: this.profile.recoilStrength,
       recoilRecovery: this.profile.recoilRecovery,
+      reloadAnimation: this.profile.reloadAnimation,
+      shootAnimation: this.profile.shootAnimation,
       shootAnimationDuration: this.profile.shootAnimationDuration,
       muzzleFlashColor: this.profile.muzzleFlashColor,
       muzzleFlashDuration: this.profile.muzzleFlashDuration,
@@ -77,8 +87,6 @@ export class ViewModel {
         const actions = new Map();
         const weaponAnchor = new THREE.Object3D();
 
-        model.scale.fromArray(GAME_CONFIG.viewModel.scale);
-        model.rotation.set(...GAME_CONFIG.viewModel.rotation);
         model.add(weaponAnchor);
         model.traverse((child) => {
           child.frustumCulled = false;
@@ -129,7 +137,13 @@ export class ViewModel {
       ...this.defaultProfile,
       ...profile,
       rigModelPath: profile.rigModelPath ?? this.defaultProfile.rigModelPath,
+      rigScale: profile.rigScale ?? this.defaultProfile.rigScale,
+      rigRotation: profile.rigRotation ?? this.defaultProfile.rigRotation,
       holderPosition: profile.holderPosition ?? this.defaultProfile.holderPosition,
+      idleAnimation: profile.idleAnimation ?? this.defaultProfile.idleAnimation,
+      reloadAnimation:
+        profile.reloadAnimation ?? this.defaultProfile.reloadAnimation,
+      shootAnimation: profile.shootAnimation ?? this.defaultProfile.shootAnimation,
       weaponModelPath:
         profile.weaponModelPath ?? this.defaultProfile.weaponModelPath,
       weaponPosition: profile.weaponPosition ?? this.defaultProfile.weaponPosition,
@@ -148,6 +162,8 @@ export class ViewModel {
     }
 
     this.setActiveRig(this.profile.rigModelPath);
+    this.model.scale.fromArray(this.profile.rigScale);
+    this.model.rotation.set(...this.profile.rigRotation);
     this.swapWeaponMesh(this.profile.weaponModelPath);
 
     if (this.bakedWeapon) {
@@ -226,7 +242,7 @@ export class ViewModel {
     if (this.actionTimer > 0) {
       this.actionTimer = Math.max(0, this.actionTimer - deltaTime);
 
-      if (this.actionTimer === 0 && this.currentAction !== "Armature|Idle") {
+      if (this.actionTimer === 0 && this.currentAction !== this.profile.idleAnimation) {
         this.playIdle();
       }
     }
@@ -276,24 +292,48 @@ export class ViewModel {
   }
 
   playIdle() {
-    this.play("Armature|Idle");
+    if (!this.profile.idleAnimation) {
+      this.stopAll();
+      this.currentAction = null;
+      this.actionTimer = 0;
+      return 0;
+    }
+
+    return this.play(this.profile.idleAnimation);
   }
 
   playShoot(duration = this.profile.shootAnimationDuration) {
-    this.play("Armature|Shoot", null, false);
-    if (duration) {
-      this.actionTimer = duration;
+    const resolvedDuration =
+      this.play(this.profile.shootAnimation, null, false) || duration || 0;
+    if (resolvedDuration) {
+      this.actionTimer = resolvedDuration;
     }
     this.recoilOffset += this.profile.recoilStrength;
-    this.muzzleFlash.color.setHex(this.profile.muzzleFlashColor);
-    this.muzzleFlashTimer = this.profile.muzzleFlashDuration;
+    if (this.profile.muzzleFlashDuration > 0 && this.profile.muzzleFlashIntensity > 0) {
+      this.muzzleFlash.color.setHex(this.profile.muzzleFlashColor);
+      this.muzzleFlashTimer = this.profile.muzzleFlashDuration;
+    } else {
+      this.muzzleFlashTimer = 0;
+      this.muzzleFlash.intensity = 0;
+    }
   }
 
   playReload(duration) {
-    const resolvedDuration = duration || this.getClipDuration("Armature|Reload");
-    const clipDuration = this.play("Armature|Reload", null, false);
+    if (!this.profile.reloadAnimation) {
+      this.actionTimer = 0;
+      return 0;
+    }
+
+    const resolvedDuration = duration || this.getClipDuration(this.profile.reloadAnimation);
+    const clipDuration = this.play(this.profile.reloadAnimation, null, false);
     this.actionTimer = resolvedDuration || clipDuration;
     return this.actionTimer;
+  }
+
+  stopAll() {
+    for (const currentAction of this.actions.values()) {
+      currentAction.stop();
+    }
   }
 
   getClipDuration(name) {
@@ -302,15 +342,16 @@ export class ViewModel {
   }
 
   play(name, loopDuration = null, loop = null) {
+    if (!name) {
+      return 0;
+    }
+
     const action = this.actions.get(name);
     if (!action) {
       return 0;
     }
 
-    for (const currentAction of this.actions.values()) {
-      currentAction.stop();
-    }
-
+    this.stopAll();
     action.reset();
     this.currentAction = name;
 
