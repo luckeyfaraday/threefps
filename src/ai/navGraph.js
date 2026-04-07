@@ -21,6 +21,8 @@ export class NavGraph {
   }
 
   buildFromConfig() {
+    this.nodes = [];
+    this.nodeMap = new Map();
     const routeConfig = GAME_CONFIG.survival.routeAssist?.nodes ?? [];
     const spawnPoints = GAME_CONFIG.survival.spawnPoints ?? [];
 
@@ -32,6 +34,22 @@ export class NavGraph {
       const id = `spawn_${pos[0].toFixed(0)}_${pos[2].toFixed(0)}`;
       if (!this.nodeMap.has(id)) {
         this.addNode(id, pos, []);
+      }
+    }
+
+    for (const pos of spawnPoints) {
+      const spawnId = `spawn_${pos[0].toFixed(0)}_${pos[2].toFixed(0)}`;
+      const nearestRouteNode = this.getNearestRouteNode(new THREE.Vector3(...pos));
+      if (nearestRouteNode && nearestRouteNode.id !== spawnId) {
+        const spawnNode = this.nodeMap.get(spawnId);
+        if (spawnNode) {
+          if (!spawnNode.links.includes(nearestRouteNode.id)) {
+            spawnNode.links.push(nearestRouteNode.id);
+          }
+          if (!nearestRouteNode.links.includes(spawnId)) {
+            nearestRouteNode.links.push(spawnId);
+          }
+        }
       }
     }
 
@@ -160,6 +178,29 @@ export class NavGraph {
 
   findNearestNode(position) {
     return this.getNodeAtPosition(position);
+  }
+
+  getNearestRouteNode(position) {
+    let bestNode = null;
+    let bestDist = Infinity;
+
+    for (const node of this.nodes) {
+      if (node.id.startsWith("spawn_")) {
+        continue;
+      }
+
+      const dist = Math.hypot(
+        position.x - node.position[0],
+        position.y - node.position[1],
+        position.z - node.position[2]
+      );
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestNode = node;
+      }
+    }
+
+    return bestNode;
   }
 
   getNextWaypoint(fromPos, toPos) {
