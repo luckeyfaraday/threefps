@@ -169,6 +169,9 @@ export const GAME_CONFIG = {
       speed: 3.15,
       score: 10,
       eyeHeight: 1.1,
+      sightRange: 35,
+      hearingRange: 20,
+      memoryDuration: 6,
       animation: {
         death: "CharacterArmature|Death",
         hit: "CharacterArmature|HitReact",
@@ -193,6 +196,9 @@ export const GAME_CONFIG = {
       speed: 4.1,
       score: 18,
       eyeHeight: 1.08,
+      sightRange: 40,
+      hearingRange: 25,
+      memoryDuration: 8,
       animation: {
         death: "CharacterArmature|Death",
         hit: "CharacterArmature|HitReact",
