@@ -3,10 +3,14 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { Capsule } from "three/addons/math/Capsule.js";
 import { clone } from "three/addons/utils/SkeletonUtils.js";
 import { GAME_CONFIG } from "../core/config.js";
+import { AIState, StateMachine } from "../ai/stateMachine.js";
+import { Awareness } from "../ai/awareness.js";
+import { Tactics } from "../ai/tactics.js";
+import { SquadManager } from "../ai/squad.js";
+import { NavGraph } from "../ai/navGraph.js";
 
 const UP = new THREE.Vector3(0, 1, 0);
 const DEATH_DROP = 0.32;
-const DETOUR_ANGLES = [0, 0.55, -0.55, 1.1, -1.1];
 const groundProbe = new THREE.Raycaster();
 const groundProbeOrigin = new THREE.Vector3();
 const groundProbeDirection = new THREE.Vector3(0, -1, 0);
@@ -14,114 +18,27 @@ const visibilityProbe = new THREE.Raycaster();
 const visibilityOrigin = new THREE.Vector3();
 const visibilityDirection = new THREE.Vector3();
 const moveDirection = new THREE.Vector3();
-const candidateDirection = new THREE.Vector3();
-const candidateStep = new THREE.Vector3();
 const toPlayerVector = new THREE.Vector3();
 const black = new THREE.Color(0x000000);
-const routeTargetVector = new THREE.Vector3();
-const steerProbeOrigin = new THREE.Vector3();
-const steerProbeDir = new THREE.Vector3();
-const steerResult = new THREE.Vector3();
-const steerForce = new THREE.Vector3();
-const probeHits = [];
-
-function findNearestRouteNode(position) {
-  const nodes = GAME_CONFIG.survival.routeAssist?.nodes ?? [];
-  if (nodes.length === 0) {
-    return null;
-  }
-
-  let bestNode = null;
-  let bestDistance = Number.POSITIVE_INFINITY;
-
-  for (const node of nodes) {
-    const distance = Math.hypot(
-      position.x - node.position[0],
-      position.y - node.position[1],
-      position.z - node.position[2],
-    );
-    if (distance < bestDistance) {
-      bestDistance = distance;
-      bestNode = node;
-    }
-  }
-
-  return bestNode;
-}
-
-function findRouteStep(startId, goalId) {
-  if (!startId || !goalId || startId === goalId) {
-    return null;
-  }
-
-  const nodes = GAME_CONFIG.survival.routeAssist?.nodes ?? [];
-  const nodeMap = new Map(nodes.map((node) => [node.id, node]));
-  const queue = [startId];
-  const parents = new Map([[startId, null]]);
-
-  while (queue.length > 0) {
-    const currentId = queue.shift();
-    const current = nodeMap.get(currentId);
-    if (!current) {
-      continue;
-    }
-
-    if (currentId === goalId) {
-      break;
-    }
-
-    for (const nextId of current.links ?? []) {
-      if (parents.has(nextId) || !nodeMap.has(nextId)) {
-        continue;
-      }
-      parents.set(nextId, currentId);
-      queue.push(nextId);
-    }
-  }
-
-  if (!parents.has(goalId)) {
-    return null;
-  }
-
-  let cursor = goalId;
-  let previous = parents.get(cursor);
-  while (previous && previous !== startId) {
-    cursor = previous;
-    previous = parents.get(cursor);
-  }
-
-  return nodeMap.get(cursor);
-}
-
-function getRouteAssistTarget(fromPosition, targetPosition, hasSight) {
-  const config = GAME_CONFIG.survival.routeAssist;
-  if (!config?.nodes?.length) {
-    return null;
-  }
-
-  const verticalGap = Math.abs(targetPosition.y - fromPosition.y);
-  const needsAssist = verticalGap > config.verticalThreshold;
-
-  if (!needsAssist) {
-    return null;
-  }
-
-  const startNode = findNearestRouteNode(fromPosition);
-  const goalNode = findNearestRouteNode(targetPosition);
-  const nextNode = findRouteStep(startNode?.id, goalNode?.id) ?? goalNode;
-
-  if (!nextNode) {
-    return null;
-  }
-
-  return routeTargetVector.set(...nextNode.position);
-}
 
 class Zombie {
-  constructor(scene, profile, spawnPoint, archetype) {
+  constructor(scene, profile, spawnPoint, archetype, navGraph, squadManager) {
     this.scene = scene;
     this.profile = profile;
     this.archetype = archetype;
+    this.navGraph = navGraph;
+    this.squadManager = squadManager;
+    this.awareness = new Awareness({
+      sightRange: profile.sightRange ?? 30,
+      hearingRange: profile.hearingRange ?? 15,
+      memoryDuration: profile.memoryDuration ?? 8
+    });
+    this.tactics = new Tactics();
+    this.stateMachine = new StateMachine(this, AIState.PURSUE);
+    this.lastKnownPlayerPos = null;
+    this.squadId = null;
+    this.setupStateTransitions();
+
     this.health = profile.health;
     this.dead = false;
     this.deathTimer = 0;
@@ -130,12 +47,12 @@ class Zombie {
     this.transientTimer = 0;
     this.transientFallback = null;
     this.currentLoop = null;
-    this.noSightTimer = 0;
     this.stuckTimer = 0;
     this.lastFootPosition = new THREE.Vector3(spawnPoint[0], spawnPoint[1], spawnPoint[2]);
     this.velocity = new THREE.Vector3();
     this.correction = new THREE.Vector3();
     this.onFloor = false;
+    this.targetDirection = null;
     this.segmentHeight = Math.max(0.1, profile.height - profile.radius * 2);
     this.collider = new Capsule(
       new THREE.Vector3(
@@ -191,6 +108,46 @@ class Zombie {
     this.playLoop(this.profile.animation.idle);
   }
 
+  setupStateTransitions() {
+    this.stateMachine.addTransition(AIState.IDLE, AIState.ALERT, (e) => {
+      return e.awareness.getAlertLevel() > 0.2;
+    });
+
+    this.stateMachine.addTransition(AIState.IDLE, AIState.PURSUE, (e) => {
+      return true;
+    });
+
+    this.stateMachine.addTransition(AIState.ALERT, AIState.PURSUE, (e) => {
+      return true;
+    });
+
+    this.stateMachine.addTransition(AIState.ALERT, AIState.IDLE, (e) => {
+      return e.stateMachine.timeInCurrentState() > 3 &&
+             e.awareness.hasMemoryExpired();
+    });
+
+    this.stateMachine.addTransition(AIState.PURSUE, AIState.ATTACK, (e) => {
+      const dist = e.distanceToPlayer();
+      return dist <= e.profile.attackRange &&
+             e.awareness.getAlertLevel() > 0.3;
+    });
+
+    this.stateMachine.addTransition(AIState.ATTACK, AIState.PURSUE, (e) => {
+      return e.attackTimer > 0 || e.distanceToPlayer() > e.profile.attackRange * 1.2;
+    });
+  }
+
+  onStateChange(from, to) {
+  }
+
+  distanceToPlayer() {
+    if (!this.lastKnownPlayerPos) return Infinity;
+    return Math.hypot(
+      this.lastKnownPlayerPos.x - this.collider.start.x,
+      this.lastKnownPlayerPos.z - this.collider.start.z
+    );
+  }
+
   applyDamage(amount) {
     if (this.dead) {
       return { hit: false, killed: false, score: 0 };
@@ -199,6 +156,7 @@ class Zombie {
     this.health = Math.max(0, this.health - amount);
     this.flinchYaw += (Math.random() - 0.5) * 0.3;
     this.flashHit();
+    this.awareness.setAlertLevel(1);
 
     if (this.health === 0) {
       this.dead = true;
@@ -207,6 +165,9 @@ class Zombie {
         child.userData.damageable = null;
       });
       this.playTransient(this.profile.animation.death, this.deathTimer);
+      if (this.squadId !== null && this.squadManager) {
+        this.squadManager.reassignMember(this, null);
+      }
       return { hit: true, killed: true, score: this.profile.score };
     }
 
@@ -243,95 +204,157 @@ class Zombie {
       return { damage: 0, removable: this.deathTimer === 0 };
     }
 
-    const toPlayer = toPlayerVector.set(
+    const hasSight = this.hasLineOfSight(playerPosition, collisionWorld);
+    this.awareness.update(deltaTime, this, playerPosition, collisionWorld, hasSight);
+
+    const knownPos = this.awareness.getKnownPlayerPosition();
+    if (knownPos) {
+      this.lastKnownPlayerPos = knownPos.clone();
+    } else if (hasSight) {
+      this.lastKnownPlayerPos = playerPosition.clone();
+    }
+
+    this.stateMachine.update(deltaTime);
+
+    this.executeStateBehavior(playerPosition, collisionWorld, hasSight);
+
+    const planarStep = Math.hypot(
+      this.collider.start.x - this.lastFootPosition.x,
+      this.collider.start.z - this.lastFootPosition.z,
+    );
+    const recoveryConfig = GAME_CONFIG.survival.pressureRecovery;
+    const distToActualPlayer = Math.hypot(
       playerPosition.x - this.collider.start.x,
-      0,
       playerPosition.z - this.collider.start.z,
     );
-    const verticalGap = Math.abs(
-      playerPosition.y - (this.getFootY() + (this.profile.eyeHeight ?? 1)),
+    this.stuckTimer =
+      this.targetDirection &&
+      distToActualPlayer > this.profile.attackRange &&
+      planarStep < recoveryConfig.stuckDistanceEpsilon
+        ? this.stuckTimer + deltaTime
+        : 0;
+    this.lastFootPosition.set(
+      this.collider.start.x,
+      this.getFootY(),
+      this.collider.start.z,
     );
-    toPlayer.y = 0;
-    const distance = toPlayer.length();
-    if (distance > 0.0001) {
-      toPlayer.normalize();
+
+    if (this.stateMachine.isState(AIState.DEAD)) {
+      return { damage: 0, removable: this.deathTimer === 0 };
     }
 
+    return { damage: 0, removable: false };
+  }
+
+  executeStateBehavior(playerPosition, collisionWorld, hasSight) {
+    const state = this.stateMachine.currentState;
+    const dist = this.distanceToPlayer();
+    const verticalGap = Math.abs(
+      playerPosition.y - (this.getFootY() + (this.profile.eyeHeight ?? 1))
+    );
     let wantsMove = true;
     let attackNow = false;
-    const hasSight = this.hasLineOfSight(playerPosition, collisionWorld);
-    const routeTarget = getRouteAssistTarget(
-      this.collider.start,
-      playerPosition,
-      hasSight,
-    );
-    let desiredDirection = null;
 
-    if (this.profile.attackType === "ranged") {
-      const preferredRange = this.profile.preferredRange ?? this.profile.attackRange * 0.6;
-      const retreatRange = this.profile.retreatRange ?? preferredRange * 0.55;
-      const pursuitTarget = routeTarget ?? playerPosition;
-      const toPursuit = candidateDirection.set(
-        pursuitTarget.x - this.collider.start.x,
-        0,
-        pursuitTarget.z - this.collider.start.z,
+    switch (state) {
+      case AIState.IDLE:
+        this.targetDirection = null;
+        if (this.transientTimer === 0) {
+          this.playLoop(this.profile.animation.idle);
+        }
+        break;
+
+      case AIState.ALERT:
+        if (this.awareness.getLastHeardPosition()) {
+          this.targetDirection = new THREE.Vector3()
+            .subVectors(this.awareness.getLastHeardPosition(), this.collider.start)
+            .normalize();
+        } else if (this.awareness.getKnownPlayerPosition()) {
+          this.targetDirection = new THREE.Vector3()
+            .subVectors(this.awareness.getKnownPlayerPosition(), this.collider.start)
+            .normalize();
+        }
+        if (this.transientTimer === 0) {
+          this.playLoop(this.profile.animation.idle);
+        }
+        break;
+
+      case AIState.PURSUE:
+        this.targetDirection = new THREE.Vector3()
+          .subVectors(playerPosition, this.collider.start)
+          .normalize();
+
+        const inAttackRange = dist <= this.profile.attackRange;
+        const goodVertical = verticalGap <= (this.profile.attackHeightTolerance ?? 1.8);
+
+        if (inAttackRange && goodVertical && this.attackTimer === 0) {
+          if (this.profile.attackType === "ranged") {
+            const preferredRange = this.profile.preferredRange ?? this.profile.attackRange * 0.6;
+            if (dist >= preferredRange * 0.8) {
+              attackNow = true;
+            }
+          } else {
+            attackNow = true;
+          }
+        }
+        break;
+
+      case AIState.ATTACK:
+        this.targetDirection = null;
+        if (dist > this.profile.attackRange * 1.1) {
+          this.stateMachine.setState(AIState.PURSUE);
+          return;
+        }
+
+        const canAttack = hasSight &&
+          verticalGap <= (this.profile.attackHeightTolerance ?? 1.8) &&
+          this.attackTimer === 0;
+
+        if (canAttack) {
+          attackNow = true;
+        }
+        break;
+    }
+
+    if (attackNow) {
+      this.attackTimer = this.profile.attackCooldown;
+      this.playTransient(
+        this.profile.animation.attack,
+        this.getClipDuration(this.profile.animation.attack) || 0.42,
+        this.profile.animation.idle,
       );
-      if (toPursuit.lengthSq() > 0) {
-        toPursuit.normalize();
-      }
+      this.stateMachine.setState(AIState.ATTACK);
+      return;
+    }
 
-      if (distance > preferredRange || !hasSight || routeTarget) {
-        desiredDirection = toPursuit;
-      } else if (distance < retreatRange) {
-        desiredDirection = candidateDirection.copy(toPlayer).multiplyScalar(-1);
-      } else {
-        wantsMove = false;
-      }
+    if (this.targetDirection && wantsMove) {
+      const chosenDirection = this.chooseMoveDirection(this.targetDirection, collisionWorld);
+      moveDirection.copy(chosenDirection);
 
-      if (
-        hasSight &&
-        verticalGap <= (this.profile.attackHeightTolerance ?? 1.8) &&
-        distance <= this.profile.attackRange &&
-        this.attackTimer === 0
-      ) {
-        attackNow = true;
+      const control = this.onFloor ? 14 : 6;
+      this.velocity.x = THREE.MathUtils.damp(
+        this.velocity.x,
+        moveDirection.x * this.profile.speed,
+        control,
+        0.016,
+      );
+      this.velocity.z = THREE.MathUtils.damp(
+        this.velocity.z,
+        moveDirection.z * this.profile.speed,
+        control,
+        0.016,
+      );
+
+      if (dist > 0.0001) {
+        this.group.rotation.y = Math.atan2(moveDirection.x, moveDirection.z);
       }
     } else {
-      const pursuitTarget = routeTarget ?? playerPosition;
-      const toPursuit = candidateDirection.set(
-        pursuitTarget.x - this.collider.start.x,
-        0,
-        pursuitTarget.z - this.collider.start.z,
-      );
-      if (toPursuit.lengthSq() > 0) {
-        toPursuit.normalize();
-      }
-
-      if (distance > this.profile.attackRange * 0.92) {
-        desiredDirection = toPursuit;
-      } else {
-        wantsMove = false;
-      }
-
-      if (
-        verticalGap <= (this.profile.attackHeightTolerance ?? 1) &&
-        distance <= this.profile.attackRange &&
-        this.attackTimer === 0
-      ) {
-        attackNow = true;
-      }
+      moveDirection.set(0, 0, 0);
+      this.velocity.x = THREE.MathUtils.damp(this.velocity.x, 0, 14, 0.016);
+      this.velocity.z = THREE.MathUtils.damp(this.velocity.z, 0, 14, 0.016);
     }
 
-    this.updateMovement(
-      wantsMove && desiredDirection ? desiredDirection : null,
-      deltaTime,
-      collisionWorld,
-    );
-
-    if (distance > 0.0001) {
-      const facing = wantsMove ? moveDirection : toPlayer;
-      this.group.rotation.y = Math.atan2(facing.x, facing.z);
-    }
+    this.applyVelocity(0.016);
+    this.resolveCollisions(collisionWorld);
 
     this.group.position.set(
       this.collider.start.x,
@@ -342,116 +365,13 @@ class Zombie {
 
     this.fadeHitFlash();
 
-    const planarStep = Math.hypot(
-      this.collider.start.x - this.lastFootPosition.x,
-      this.collider.start.z - this.lastFootPosition.z,
-    );
-    const recoveryConfig = GAME_CONFIG.survival.pressureRecovery;
-    this.noSightTimer =
-      !hasSight && distance > this.profile.attackRange * 1.5
-        ? this.noSightTimer + deltaTime
-        : 0;
-    this.stuckTimer =
-      wantsMove &&
-      distance > this.profile.attackRange * 1.5 &&
-      planarStep < recoveryConfig.stuckDistanceEpsilon
-        ? this.stuckTimer + deltaTime
-        : 0;
-    this.lastFootPosition.set(
-      this.collider.start.x,
-      this.getFootY(),
-      this.collider.start.z,
-    );
-
-    if (attackNow) {
-      this.attackTimer = this.profile.attackCooldown;
-      this.playTransient(
-        this.profile.animation.attack,
-        this.getClipDuration(this.profile.animation.attack) || 0.42,
-        this.profile.animation.idle,
-      );
-      return { damage: this.profile.attackDamage, removable: false };
+    if (this.transientTimer === 0 && !attackNow) {
+      const shouldMove = this.targetDirection !== null && state !== AIState.RETREAT;
+      this.playLoop(shouldMove ? this.profile.animation.move : this.profile.animation.idle);
     }
-
-    if (this.transientTimer === 0) {
-      this.playLoop(wantsMove ? this.profile.animation.move : this.profile.animation.idle);
-    }
-
-    return { damage: 0, removable: false };
   }
 
-  needsPressureRecovery(playerPosition) {
-    if (this.dead) {
-      return false;
-    }
-
-    const config = GAME_CONFIG.survival.pressureRecovery;
-    const planarDistance = Math.hypot(
-      playerPosition.x - this.collider.start.x,
-      playerPosition.z - this.collider.start.z,
-    );
-    const isFarAway = planarDistance > config.maxPlayerDistance;
-    const isFarAndStuck =
-      planarDistance > config.stuckRecoveryDistance &&
-      this.stuckTimer >= config.stuckTimeout;
-
-    return (
-      this.getFootY() < GAME_CONFIG.player.oobY ||
-      isFarAway ||
-      isFarAndStuck
-    );
-  }
-
-  relocate(spawnPoint) {
-    this.collider.start.set(
-      spawnPoint[0],
-      spawnPoint[1] + this.profile.radius,
-      spawnPoint[2],
-    );
-    this.collider.end.set(
-      spawnPoint[0],
-      spawnPoint[1] + this.profile.radius + this.segmentHeight,
-      spawnPoint[2],
-    );
-    this.velocity.set(0, 0, 0);
-    this.noSightTimer = 0;
-    this.stuckTimer = 0;
-    this.lastFootPosition.set(spawnPoint[0], spawnPoint[1], spawnPoint[2]);
-    this.group.position.set(
-      this.collider.start.x,
-      this.getFootY(),
-      this.collider.start.z,
-    );
-  }
-
-  updateMovement(targetDirection, deltaTime, collisionWorld) {
-    if (targetDirection?.lengthSq() > 0) {
-      const chosenDirection = this.chooseMoveDirection(
-        targetDirection,
-        deltaTime,
-        collisionWorld,
-      );
-      moveDirection.copy(chosenDirection);
-
-      const control = this.onFloor ? 14 : 6;
-      this.velocity.x = THREE.MathUtils.damp(
-        this.velocity.x,
-        moveDirection.x * this.profile.speed,
-        control,
-        deltaTime,
-      );
-      this.velocity.z = THREE.MathUtils.damp(
-        this.velocity.z,
-        moveDirection.z * this.profile.speed,
-        control,
-        deltaTime,
-      );
-    } else {
-      moveDirection.set(0, 0, 0);
-      this.velocity.x = THREE.MathUtils.damp(this.velocity.x, 0, 14, deltaTime);
-      this.velocity.z = THREE.MathUtils.damp(this.velocity.z, 0, 14, deltaTime);
-    }
-
+  applyVelocity(deltaTime) {
     let damping = Math.exp(-GAME_CONFIG.player.floorDamping * deltaTime) - 1;
 
     if (!this.onFloor) {
@@ -461,10 +381,9 @@ class Zombie {
 
     this.velocity.addScaledVector(this.velocity, damping);
     this.collider.translate(this.correction.copy(this.velocity).multiplyScalar(deltaTime));
-    this.resolveCollisions(collisionWorld);
   }
 
-  chooseMoveDirection(targetDirection, deltaTime, collisionWorld) {
+  chooseMoveDirection(targetDirection, collisionWorld) {
     if (targetDirection.lengthSq() === 0) {
       return new THREE.Vector3();
     }
@@ -476,14 +395,15 @@ class Zombie {
     const probeOrigin = this.collider.start.clone();
     probeOrigin.y = this.getFootY() + this.profile.eyeHeight * 0.75;
 
-    steerResult.set(0, 0, 0);
-    probeHits.length = 0;
+    const steerResult = new THREE.Vector3();
+    const steerForce = new THREE.Vector3();
+    const probeHits = [];
 
     for (let i = 0; i < probeCount; i++) {
       const angle = -spreadAngle / 2 + (spreadAngle / (probeCount - 1)) * i;
-      steerProbeDir.copy(seek).applyAxisAngle(UP, angle);
+      const steerProbeDir = new THREE.Vector3().copy(seek).applyAxisAngle(UP, angle);
 
-      steerProbeOrigin.copy(probeOrigin);
+      const steerProbeOrigin = probeOrigin.clone();
       const ray = new THREE.Raycaster(steerProbeOrigin, steerProbeDir, 0.05, rayLength);
       const hits = ray.intersectObjects(collisionWorld.getShootables(), true);
 
@@ -491,7 +411,7 @@ class Zombie {
         const hit = hits[0];
         const penetration = rayLength - hit.distance;
         if (penetration > 0) {
-          probeHits.push({ angle, penetration, dir: steerProbeDir.clone() });
+          probeHits.push({ penetration, dir: steerProbeDir.clone() });
         }
       }
     }
@@ -499,8 +419,6 @@ class Zombie {
     if (probeHits.length === 0) {
       return seek;
     }
-
-    steerForce.set(0, 0, 0);
 
     for (const hit of probeHits) {
       const weight = hit.penetration * 3;
@@ -665,9 +583,13 @@ export class ZombieManager {
     this.intermissionTimer = GAME_CONFIG.survival.initialDelay;
     this.status = "Intermission";
     this.spawnCursor = 0;
+    this.navGraph = new NavGraph();
+    this.squadManager = new SquadManager();
   }
 
   async load() {
+    this.navGraph.buildFromConfig();
+
     const uniquePaths = [
       ...new Set(
         Object.values(GAME_CONFIG.zombies)
@@ -709,6 +631,7 @@ export class ZombieManager {
     this.intermissionTimer = GAME_CONFIG.survival.initialDelay;
     this.status = "Intermission";
     this.spawnCursor = 0;
+    this.squadManager = new SquadManager();
   }
 
   getShootables() {
@@ -751,13 +674,15 @@ export class ZombieManager {
       this.status = this.pendingSpawns > 0 ? "Incoming" : "Survive";
     }
 
+    this.squadManager.update(deltaTime, playerPosition);
+
     for (let index = this.zombies.length - 1; index >= 0; index -= 1) {
       const zombie = this.zombies[index];
       const result = zombie.update(deltaTime, playerPosition, this.collisionWorld);
       damageToPlayer += result.damage;
 
-      if (zombie.needsPressureRecovery(playerPosition)) {
-        zombie.relocate(this.findRecoveryPoint(playerPosition, zombie.profile));
+      if (zombie.needsPressureRecovery?.(playerPosition)) {
+        zombie.relocate?.(this.findRecoveryPoint(playerPosition, zombie.profile));
       }
 
       if (!result.removable) {
@@ -767,6 +692,8 @@ export class ZombieManager {
       zombie.dispose();
       this.zombies.splice(index, 1);
     }
+
+    this.squadManager.cleanupEmptySquads();
 
     return {
       damageToPlayer,
@@ -800,8 +727,13 @@ export class ZombieManager {
     if (!archetype) {
       return;
     }
-    const zombie = new Zombie(this.scene, profile, spawnPoint, archetype);
+    const zombie = new Zombie(this.scene, profile, spawnPoint, archetype, this.navGraph, this.squadManager);
     this.zombies.push(zombie);
+
+    if (this.wave >= 2) {
+      const squad = this.squadManager.createSquad();
+      squad.addMember(zombie);
+    }
   }
 
   registerKill(score) {
