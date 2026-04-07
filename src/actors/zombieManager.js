@@ -766,6 +766,60 @@ class Zombie {
     }
   }
 
+  needsPressureRecovery(playerPosition) {
+    if (this.dead || !playerPosition) {
+      return false;
+    }
+
+    const recovery = GAME_CONFIG.survival.pressureRecovery;
+    const planarDistance = Math.hypot(
+      playerPosition.x - this.collider.start.x,
+      playerPosition.z - this.collider.start.z,
+    );
+
+    if (this.getFootY() < GAME_CONFIG.player.oobY) {
+      return true;
+    }
+
+    if (planarDistance > recovery.maxPlayerDistance) {
+      return true;
+    }
+
+    if (
+      planarDistance > recovery.stuckRecoveryDistance &&
+      this.stuckTimer >= recovery.stuckTimeout
+    ) {
+      return true;
+    }
+
+    return false;
+  }
+
+  relocate(position) {
+    if (!position || this.dead) {
+      return;
+    }
+
+    const [x, y, z] = position;
+    const startY = y + this.profile.radius;
+    const endY = startY + this.segmentHeight;
+
+    this.collider.start.set(x, startY, z);
+    this.collider.end.set(x, endY, z);
+    this.group.position.set(x, y, z);
+    this.velocity.set(0, 0, 0);
+    this.correction.set(0, 0, 0);
+    this.steerDirection.set(0, 0, 0);
+    this.targetDirection = null;
+    this.activePath = [];
+    this.pathIndex = 0;
+    this.activeWaypoint = null;
+    this.lastWaypointTarget = null;
+    this.repathCooldown = 0;
+    this.stuckTimer = 0;
+    this.lastFootPosition.set(x, y, z);
+  }
+
   dispose() {
     this.scene.remove(this.group);
   }
