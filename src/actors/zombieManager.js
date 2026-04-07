@@ -51,8 +51,12 @@ class Zombie {
     this.lastFootPosition = new THREE.Vector3(spawnPoint[0], spawnPoint[1], spawnPoint[2]);
     this.velocity = new THREE.Vector3();
     this.correction = new THREE.Vector3();
+    this.steerDirection = new THREE.Vector3();
     this.onFloor = false;
     this.targetDirection = null;
+    this.activeWaypoint = null;
+    this.lastWaypointTarget = null;
+    this.repathCooldown = 0;
     this.segmentHeight = Math.max(0.1, profile.height - profile.radius * 2);
     this.collider = new Capsule(
       new THREE.Vector3(
@@ -138,6 +142,11 @@ class Zombie {
   }
 
   onStateChange(from, to) {
+    if (from !== to && to !== AIState.PURSUE) {
+      this.activeWaypoint = null;
+      this.lastWaypointTarget = null;
+      this.repathCooldown = 0;
+    }
   }
 
   distanceToPlayer() {
@@ -179,6 +188,7 @@ class Zombie {
     this.mixer.update(deltaTime);
     this.attackTimer = Math.max(0, this.attackTimer - deltaTime);
     this.transientTimer = Math.max(0, this.transientTimer - deltaTime);
+    this.repathCooldown = Math.max(0, this.repathCooldown - deltaTime);
     this.flinchYaw = THREE.MathUtils.damp(this.flinchYaw, 0, 10, deltaTime);
 
     if (this.transientTimer === 0 && this.transientFallback && !this.dead) {
@@ -216,7 +226,7 @@ class Zombie {
 
     this.stateMachine.update(deltaTime);
 
-    this.executeStateBehavior(playerPosition, collisionWorld, hasSight);
+    this.executeStateBehavior(deltaTime, playerPosition, collisionWorld, hasSight);
 
     const planarStep = Math.hypot(
       this.collider.start.x - this.lastFootPosition.x,
@@ -246,7 +256,7 @@ class Zombie {
     return { damage: 0, removable: false };
   }
 
-  executeStateBehavior(playerPosition, collisionWorld, hasSight) {
+  executeStateBehavior(deltaTime, playerPosition, collisionWorld, hasSight) {
     const state = this.stateMachine.currentState;
     const dist = this.distanceToPlayer();
     const verticalGap = Math.abs(
@@ -278,9 +288,13 @@ class Zombie {
         }
         break;
 
-      case AIState.PURSUE:
+      case AIState.PURSUE: {
+        const verticalThreshold = GAME_CONFIG.survival.routeAssist?.verticalThreshold ?? 1.35;
+        const needsRouteAssist = verticalGap > verticalThreshold && this.navGraph;
+        const pursueTarget = this.getPursuitTarget(playerPosition, needsRouteAssist);
+
         this.targetDirection = new THREE.Vector3()
-          .subVectors(playerPosition, this.collider.start)
+          .subVectors(pursueTarget, this.collider.start)
           .normalize();
 
         const inAttackRange = dist <= this.profile.attackRange;
@@ -297,10 +311,11 @@ class Zombie {
           }
         }
         break;
+      }
 
       case AIState.ATTACK:
         this.targetDirection = null;
-        if (dist > this.profile.attackRange * 1.1) {
+        if (this.distanceToPlayer() > this.profile.attackRange * 1.1) {
           this.stateMachine.setState(AIState.PURSUE);
           return;
         }
@@ -327,7 +342,11 @@ class Zombie {
     }
 
     if (this.targetDirection && wantsMove) {
-      const chosenDirection = this.chooseMoveDirection(this.targetDirection, collisionWorld);
+      const chosenDirection = this.chooseMoveDirection(
+        this.targetDirection,
+        collisionWorld,
+        deltaTime,
+      );
       moveDirection.copy(chosenDirection);
 
       const control = this.onFloor ? 14 : 6;
@@ -335,13 +354,13 @@ class Zombie {
         this.velocity.x,
         moveDirection.x * this.profile.speed,
         control,
-        0.016,
+        deltaTime,
       );
       this.velocity.z = THREE.MathUtils.damp(
         this.velocity.z,
         moveDirection.z * this.profile.speed,
         control,
-        0.016,
+        deltaTime,
       );
 
       if (dist > 0.0001) {
@@ -349,11 +368,12 @@ class Zombie {
       }
     } else {
       moveDirection.set(0, 0, 0);
-      this.velocity.x = THREE.MathUtils.damp(this.velocity.x, 0, 14, 0.016);
-      this.velocity.z = THREE.MathUtils.damp(this.velocity.z, 0, 14, 0.016);
+      this.steerDirection.set(0, 0, 0);
+      this.velocity.x = THREE.MathUtils.damp(this.velocity.x, 0, 14, deltaTime);
+      this.velocity.z = THREE.MathUtils.damp(this.velocity.z, 0, 14, deltaTime);
     }
 
-    this.applyVelocity(0.016);
+    this.applyVelocity(deltaTime);
     this.resolveCollisions(collisionWorld);
 
     this.group.position.set(
@@ -371,6 +391,39 @@ class Zombie {
     }
   }
 
+  getPursuitTarget(playerPosition, needsRouteAssist) {
+    if (!needsRouteAssist || !this.navGraph) {
+      this.activeWaypoint = null;
+      this.lastWaypointTarget = null;
+      return playerPosition;
+    }
+
+    const waypointReached =
+      this.activeWaypoint &&
+      this.collider.start.distanceTo(this.activeWaypoint) <= 1.1;
+    const playerMoved =
+      this.lastWaypointTarget &&
+      this.lastWaypointTarget.distanceTo(playerPosition) > 2.5;
+    const shouldRepath =
+      !this.activeWaypoint ||
+      waypointReached ||
+      playerMoved ||
+      (this.repathCooldown === 0 && this.stuckTimer > 0.4);
+
+    if (shouldRepath) {
+      const nextWaypoint = this.navGraph.getNextWaypoint(
+        this.collider.start,
+        playerPosition,
+      );
+
+      this.activeWaypoint = nextWaypoint ? nextWaypoint.clone() : null;
+      this.lastWaypointTarget = playerPosition.clone();
+      this.repathCooldown = 0.35;
+    }
+
+    return this.activeWaypoint ?? playerPosition;
+  }
+
   applyVelocity(deltaTime) {
     let damping = Math.exp(-GAME_CONFIG.player.floorDamping * deltaTime) - 1;
 
@@ -383,7 +436,7 @@ class Zombie {
     this.collider.translate(this.correction.copy(this.velocity).multiplyScalar(deltaTime));
   }
 
-  chooseMoveDirection(targetDirection, collisionWorld) {
+  chooseMoveDirection(targetDirection, collisionWorld, deltaTime) {
     if (targetDirection.lengthSq() === 0) {
       return new THREE.Vector3();
     }
@@ -416,26 +469,42 @@ class Zombie {
       }
     }
 
+    const desiredDirection = new THREE.Vector3();
     if (probeHits.length === 0) {
-      return seek;
+      desiredDirection.copy(seek);
+    } else {
+      for (const hit of probeHits) {
+        const weight = hit.penetration * 3;
+        steerForce.add(hit.dir.clone().multiplyScalar(-weight));
+      }
+
+      const perpendicular = new THREE.Vector3().crossVectors(UP, seek).normalize();
+      for (const hit of probeHits) {
+        const lateral = Math.sign(hit.dir.dot(perpendicular));
+        steerForce.add(perpendicular.clone().multiplyScalar(lateral * hit.penetration * 1.5));
+      }
+
+      steerResult.copy(seek).add(steerForce);
+      if (steerResult.lengthSq() < 0.001) {
+        desiredDirection.copy(seek);
+      } else {
+        desiredDirection.copy(steerResult.normalize());
+      }
     }
 
-    for (const hit of probeHits) {
-      const weight = hit.penetration * 3;
-      steerForce.add(hit.dir.clone().multiplyScalar(-weight));
+    if (this.steerDirection.lengthSq() === 0) {
+      this.steerDirection.copy(desiredDirection);
+      return desiredDirection;
     }
 
-    const perpendicular = new THREE.Vector3().crossVectors(UP, seek).normalize();
-    for (const hit of probeHits) {
-      const lateral = Math.sign(hit.dir.dot(perpendicular));
-      steerForce.add(perpendicular.clone().multiplyScalar(lateral * hit.penetration * 1.5));
+    const steerBlend = 1 - Math.exp(-10 * deltaTime);
+    this.steerDirection.lerp(desiredDirection, steerBlend);
+    if (this.steerDirection.lengthSq() < 0.001) {
+      this.steerDirection.copy(desiredDirection);
+    } else {
+      this.steerDirection.normalize();
     }
-
-    steerResult.copy(seek).add(steerForce);
-    if (steerResult.lengthSq() < 0.001) {
-      return seek;
-    }
-    return steerResult.normalize();
+    return this.steerDirection.clone();
   }
 
   resolveCollisions(collisionWorld) {
