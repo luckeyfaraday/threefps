@@ -184,18 +184,37 @@ class Zombie {
       if (this.squadId !== null && this.squadManager) {
         this.squadManager.reassignMember(this, null);
       }
+      const drops = [];
+      if (this.profile.dropAmmoType) {
+        drops.push({
+          amount: this.profile.dropAmmoAmount ?? 0,
+          pickupType: this.profile.dropAmmoType,
+          position: new THREE.Vector3(
+            this.collider.start.x,
+            this.getFootY() + 0.12,
+            this.collider.start.z,
+          ),
+        });
+      }
+
+      const healthConfig = GAME_CONFIG.pickups.health;
+      if (
+        healthConfig?.modelPath &&
+        healthConfig.healAmount > 0 &&
+        Math.random() < (healthConfig.dropChance ?? 0)
+      ) {
+        drops.push({
+          amount: healthConfig.healAmount,
+          pickupType: "heart",
+          position: new THREE.Vector3(
+            this.collider.start.x,
+            this.getFootY() + 0.12,
+            this.collider.start.z,
+          ),
+        });
+      }
       return {
-        drop: this.profile.dropAmmoType
-          ? {
-              ammoType: this.profile.dropAmmoType,
-              amount: this.profile.dropAmmoAmount ?? 0,
-              position: new THREE.Vector3(
-                this.collider.start.x,
-                this.getFootY() + 0.12,
-                this.collider.start.z,
-              ),
-            }
-          : null,
+        drops,
         hit: true,
         killed: true,
         score: this.profile.score,

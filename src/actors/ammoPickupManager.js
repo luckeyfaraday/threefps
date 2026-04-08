@@ -15,9 +15,25 @@ export class AmmoPickupManager {
 
   async load() {
     const ammoEntries = Object.entries(GAME_CONFIG.pickups.ammo ?? {});
+    const healthConfig = GAME_CONFIG.pickups.health;
 
     await Promise.all(
-      ammoEntries.map(async ([ammoType, config]) => {
+      [
+        ...ammoEntries.map(([ammoType, config]) => ({
+          kind: "ammo",
+          pickupType: ammoType,
+          ...config,
+        })),
+        ...(healthConfig
+          ? [
+              {
+                kind: "health",
+                pickupType: "heart",
+                ...healthConfig,
+              },
+            ]
+          : []),
+      ].map(async ({ kind, pickupType, ...config }) => {
         const gltf = await this.loader.loadAsync(config.modelPath);
         const model = gltf.scene;
         model.traverse((child) => {
@@ -33,7 +49,9 @@ export class AmmoPickupManager {
         const maxDimension = Math.max(size.x, size.y, size.z, 0.0001);
         const scale = config.size / maxDimension;
 
-        this.assets.set(ammoType, {
+        this.assets.set(pickupType, {
+          healAmount: config.healAmount ?? 0,
+          kind,
           model,
           scale,
         });
@@ -48,8 +66,8 @@ export class AmmoPickupManager {
     this.pickups = [];
   }
 
-  spawn(ammoType, amount, position) {
-    const asset = this.assets.get(ammoType);
+  spawn(pickupType, amount, position) {
+    const asset = this.assets.get(pickupType);
     if (!asset || !position || amount <= 0) {
       return;
     }
@@ -66,14 +84,15 @@ export class AmmoPickupManager {
 
     this.pickups.push({
       amount,
-      ammoType,
+      kind: asset.kind,
+      pickupType,
       baseY: root.position.y,
       root,
       time: Math.random() * Math.PI * 2,
     });
   }
 
-  update(deltaTime, playerPosition, weaponManager, canCollect = true) {
+  update(deltaTime, playerPosition, weaponManager, playerState, canCollect = true) {
     const collectionRadiusSq = GAME_CONFIG.pickups.collectionRadius ** 2;
 
     for (let index = this.pickups.length - 1; index >= 0; index -= 1) {
@@ -94,7 +113,10 @@ export class AmmoPickupManager {
         continue;
       }
 
-      const pickedUp = weaponManager.addAmmoByType(pickup.ammoType, pickup.amount);
+      const pickedUp =
+        pickup.kind === "health"
+          ? playerState?.heal(pickup.amount)
+          : weaponManager.addAmmoByType(pickup.pickupType, pickup.amount);
       if (!pickedUp) {
         continue;
       }

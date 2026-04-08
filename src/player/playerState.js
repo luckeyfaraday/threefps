@@ -21,4 +21,13 @@ export class PlayerState {
     this.dead = this.health === 0;
     return this.dead;
   }
+
+  heal(amount) {
+    if (this.dead || amount <= 0 || this.health >= this.maxHealth) {
+      return false;
+    }
+
+    this.health = Math.min(this.maxHealth, this.health + amount);
+    return true;
+  }
 }

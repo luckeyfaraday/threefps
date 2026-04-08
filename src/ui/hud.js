@@ -53,8 +53,7 @@ export class Hud {
     this.button.textContent = this.mobileMode ? "Tap To Start" : "Start Run";
     this.setStatus("Wave sim loaded. Start the run when you're ready.");
     this.setAmmo(0, 0, "", "Weapon");
-    this.deathOverlay.classList.remove("is-visible");
-    this.damageVignette.classList.remove("is-dead");
+    this.clearGameOverState();
     if (this.deathButton) {
       this.deathButton.textContent = this.mobileMode ? "Tap To Restart" : "Play Again";
     }
@@ -98,6 +97,11 @@ export class Hud {
     this.setStatus("You were overrun. Restart the run.");
     this.deathOverlay.classList.add("is-visible");
     this.damageVignette.classList.add("is-dead");
+  }
+
+  clearGameOverState() {
+    this.deathOverlay.classList.remove("is-visible");
+    this.damageVignette.classList.remove("is-dead");
   }
 
   setGameOverSummary({

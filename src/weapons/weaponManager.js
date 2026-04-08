@@ -139,11 +139,12 @@ export class WeaponManager {
         this.recordHit(this.currentWeapon.id, damageResult.killed === true);
       }
 
-      if (damageResult?.killed && damageResult.drop) {
+      const drops = damageResult?.drops ?? (damageResult?.drop ? [damageResult.drop] : []);
+      for (const drop of drops) {
         this.ammoPickups?.spawn(
-          damageResult.drop.ammoType,
-          damageResult.drop.amount,
-          damageResult.drop.position,
+          drop.pickupType ?? drop.ammoType,
+          drop.amount,
+          drop.position,
         );
       }
 

@@ -135,6 +135,12 @@ export const GAME_CONFIG = {
         size: 0.16,
       },
     },
+    health: {
+      dropChance: 0.22,
+      healAmount: 20,
+      modelPath: "./assets/models/Heart.glb",
+      size: 0.34,
+    },
   },
   survival: {
     initialDelay: 2.5,

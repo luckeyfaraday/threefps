@@ -135,6 +135,7 @@ export class Game {
     this.gameOver = false;
     this.runStarted = false;
     this.highestWave = 0;
+    this.hud.clearGameOverState();
     this.playerState.reset();
     this.player.spawn();
     this.weapon.resetRun();
@@ -192,6 +193,7 @@ export class Game {
       clampedDeltaTime,
       this.sceneKit.camera.position,
       this.weapon,
+      this.playerState,
       simulationActive,
     );
     this.footstepAudio.update(clampedDeltaTime, movementState);
