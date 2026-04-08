@@ -43,10 +43,15 @@ export class Game {
     this.ready = false;
     this.gameOver = false;
     this.runStarted = false;
+    this.highestWave = 0;
   }
 
   async init() {
     this.input.attach();
+    this.hud.setMobileMode(this.input.isMobile());
+    if (this.input.isMobile()) {
+      this.input.bindTouchControls(this.hud.getMobileControls());
+    }
     this.input.setPointerLockHandler((locked) => {
       this.hud.setLocked(locked);
 
@@ -73,7 +78,7 @@ export class Game {
     this.hud.bindStart(this.handleStart);
 
     this.sceneKit.renderer.domElement.addEventListener("click", () => {
-      if (this.ready && !this.input.isLocked()) {
+      if (this.ready && !this.input.isLocked() && !this.input.isMobile()) {
         this.input.requestPointerLock();
       }
     });
@@ -129,12 +134,13 @@ export class Game {
   restartRun() {
     this.gameOver = false;
     this.runStarted = false;
+    this.highestWave = 0;
     this.playerState.reset();
     this.player.spawn();
     this.weapon.resetRun();
     this.ammoPickups.resetRun();
     this.zombies.resetRun();
-    this.hud.button.textContent = "Start Run";
+    this.hud.button.textContent = this.input.isMobile() ? "Tap To Start" : "Start Run";
     this.hud.button.hidden = !this.input.isLocked();
     this.hud.setStatus("Start the run to begin the first wave.");
     this.hud.setSurvival({
@@ -193,6 +199,7 @@ export class Game {
       this.gameOver || !this.runStarted || !this.input.isLocked()
         ? this.zombies.getStatus()
         : this.zombies.update(clampedDeltaTime, this.sceneKit.camera.position);
+    this.highestWave = Math.max(this.highestWave, survivalState.wave);
 
     if (simulationActive && survivalState.damageToPlayer > 0) {
       this.playerAudio.playHurt(
@@ -206,12 +213,15 @@ export class Game {
       );
       const died = this.playerState.applyDamage(survivalState.damageToPlayer);
       if (died) {
+        const runSummary = this.weapon.getRunSummary();
         this.gameOver = true;
         this.cameraRig.triggerDeathEffect();
         document.exitPointerLock?.();
         this.hud.setGameOverSummary({
+          accuracy: runSummary.accuracy,
+          bestWeapon: runSummary.bestWeapon,
           kills: survivalState.kills,
-          wave: survivalState.wave,
+          wave: this.highestWave,
         });
         this.hud.setGameOver();
       }

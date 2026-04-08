@@ -14,6 +14,7 @@ export class PlayerController {
     this.velocity = new THREE.Vector3();
     this.forward = new THREE.Vector3();
     this.side = new THREE.Vector3();
+    this.moveAxes = new THREE.Vector2();
     this.correction = new THREE.Vector3();
     this.movementState = {
       horizontalSpeed: 0,
@@ -52,27 +53,37 @@ export class PlayerController {
         ? GAME_CONFIG.player.groundAcceleration
         : GAME_CONFIG.player.airAcceleration);
 
-    if (this.input.isPressed("KeyW")) {
+    this.input.getMoveAxes(this.moveAxes);
+
+    if (this.moveAxes.y > 0.0001) {
       this.velocity.add(
-        this.cameraRig.getForwardVector(this.forward).multiplyScalar(acceleration),
+        this.cameraRig
+          .getForwardVector(this.forward)
+          .multiplyScalar(acceleration * this.moveAxes.y),
       );
     }
 
-    if (this.input.isPressed("KeyS")) {
+    if (this.moveAxes.y < -0.0001) {
       this.velocity.add(
-        this.cameraRig.getForwardVector(this.forward).multiplyScalar(-acceleration),
+        this.cameraRig
+          .getForwardVector(this.forward)
+          .multiplyScalar(acceleration * this.moveAxes.y),
       );
     }
 
-    if (this.input.isPressed("KeyA")) {
+    if (this.moveAxes.x < -0.0001) {
       this.velocity.add(
-        this.cameraRig.getSideVector(this.side).multiplyScalar(-acceleration),
+        this.cameraRig
+          .getSideVector(this.side)
+          .multiplyScalar(acceleration * this.moveAxes.x),
       );
     }
 
-    if (this.input.isPressed("KeyD")) {
+    if (this.moveAxes.x > 0.0001) {
       this.velocity.add(
-        this.cameraRig.getSideVector(this.side).multiplyScalar(acceleration),
+        this.cameraRig
+          .getSideVector(this.side)
+          .multiplyScalar(acceleration * this.moveAxes.x),
       );
     }
 

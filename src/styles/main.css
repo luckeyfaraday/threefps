@@ -20,6 +20,7 @@ body {
     radial-gradient(circle at top, rgba(236, 247, 255, 0.95), transparent 40%),
     linear-gradient(180deg, #eff6fb 0%, #d7e6ef 100%);
   color: #10222d;
+  overscroll-behavior: none;
 }
 
 .viewport,
@@ -212,8 +213,44 @@ body {
 
 .death-overlay__summary {
   font-size: 1rem;
-  margin: 0;
+  margin: 0 0 20px;
   opacity: 0.85;
+}
+
+.death-overlay__stats {
+  background: rgba(21, 8, 16, 0.38);
+  border: 1px solid rgba(255, 226, 232, 0.14);
+  border-radius: 18px;
+  display: grid;
+  gap: 10px;
+  margin: 0 auto;
+  max-width: 360px;
+  padding: 16px 18px;
+}
+
+.death-overlay__stat {
+  align-items: baseline;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.death-overlay__stat-label {
+  color: rgba(255, 232, 236, 0.72);
+  font-size: 0.8rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.death-overlay__stat-value {
+  font-size: 1.08rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.death-overlay__button {
+  margin-top: 18px;
+  pointer-events: auto;
 }
 
 .ammo {
@@ -299,6 +336,136 @@ body {
   background: linear-gradient(160deg, rgba(61, 17, 14, 0.95), rgba(102, 29, 22, 0.82));
 }
 
+.mobile-controls {
+  display: none;
+  inset: 0;
+  position: absolute;
+}
+
+.hud.is-mobile .mobile-controls {
+  display: block;
+}
+
+.mobile-controls__left,
+.mobile-controls__right {
+  bottom: 20px;
+  position: absolute;
+}
+
+.mobile-controls__left {
+  left: 20px;
+}
+
+.mobile-controls__right {
+  align-items: flex-end;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  right: 20px;
+}
+
+.touchpad,
+.lookpad,
+.mobile-button,
+.mobile-weapon {
+  backdrop-filter: blur(14px);
+  background: rgba(7, 31, 46, 0.24);
+  border: 1px solid rgba(224, 247, 255, 0.22);
+  color: #ecfbff;
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.touchpad {
+  border-radius: 999px;
+  height: 128px;
+  position: relative;
+  width: 128px;
+}
+
+.touchpad::after {
+  border: 1px solid rgba(224, 247, 255, 0.18);
+  border-radius: 999px;
+  content: "";
+  inset: 18px;
+  position: absolute;
+}
+
+.touchpad__stick {
+  --stick-x: 0px;
+  --stick-y: 0px;
+  background: linear-gradient(180deg, rgba(225, 249, 255, 0.95), rgba(121, 214, 243, 0.92));
+  border-radius: 999px;
+  height: 48px;
+  left: 50%;
+  position: absolute;
+  top: 50%;
+  transform: translate(calc(-50% + var(--stick-x)), calc(-50% + var(--stick-y)));
+  width: 48px;
+}
+
+.lookpad {
+  align-items: flex-start;
+  border-radius: 22px;
+  display: flex;
+  height: 150px;
+  justify-content: flex-end;
+  padding: 12px;
+  width: min(36vw, 200px);
+}
+
+.lookpad__label {
+  color: rgba(232, 250, 255, 0.72);
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.mobile-actions,
+.mobile-weapons {
+  display: flex;
+  gap: 10px;
+}
+
+.mobile-button,
+.mobile-weapon {
+  align-items: center;
+  border-radius: 18px;
+  display: inline-flex;
+  font: inherit;
+  font-weight: 700;
+  justify-content: center;
+  min-height: 52px;
+  min-width: 52px;
+  padding: 0 14px;
+}
+
+.mobile-weapon.is-active {
+  background: linear-gradient(180deg, rgba(201, 242, 255, 0.96), rgba(139, 216, 244, 0.92));
+  border-color: rgba(234, 251, 255, 0.5);
+  color: #06202d;
+}
+
+.mobile-button--fire {
+  background: linear-gradient(180deg, rgba(255, 119, 119, 0.88), rgba(186, 32, 48, 0.86));
+  border-color: rgba(255, 217, 217, 0.3);
+  min-width: 96px;
+}
+
+.mobile-button--aux {
+  background: rgba(7, 31, 46, 0.58);
+}
+
+.hud.is-mobile .hud__tips {
+  display: none;
+}
+
+.hud.is-mobile .hud__panel {
+  max-width: min(360px, calc(100vw - 32px));
+}
+
 @media (max-width: 720px) {
   .hud__panel {
     left: 16px;
@@ -315,5 +482,34 @@ body {
   .survival {
     bottom: 16px;
     left: 16px;
+  }
+
+  .hud.is-mobile .ammo {
+    bottom: 184px;
+    left: 16px;
+    right: auto;
+  }
+
+  .hud.is-mobile .survival {
+    bottom: 94px;
+    left: 16px;
+    min-width: 180px;
+  }
+
+  .hud.is-mobile .hud__panel {
+    opacity: 0.82;
+  }
+
+  .mobile-controls__left,
+  .mobile-controls__right {
+    bottom: max(16px, env(safe-area-inset-bottom));
+  }
+
+  .mobile-controls__left {
+    left: max(16px, env(safe-area-inset-left));
+  }
+
+  .mobile-controls__right {
+    right: max(16px, env(safe-area-inset-right));
   }
 }

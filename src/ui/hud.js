@@ -4,6 +4,7 @@ export class Hud {
     this.root = documentRef.getElementById("hud");
     this.status = documentRef.getElementById("hud-status");
     this.button = documentRef.getElementById("lock-button");
+    this.deathButton = documentRef.getElementById("death-restart-button");
     this.weaponLabel = documentRef.getElementById("ammo-weapon");
     this.ammoCurrent = documentRef.getElementById("ammo-current");
     this.ammoReserve = documentRef.getElementById("ammo-reserve");
@@ -16,15 +17,31 @@ export class Hud {
     this.damageVignette = documentRef.getElementById("damage-vignette");
     this.deathOverlay = documentRef.getElementById("death-overlay");
     this.deathSummary = documentRef.getElementById("death-overlay-summary");
+    this.deathWave = documentRef.getElementById("death-wave");
+    this.deathKills = documentRef.getElementById("death-kills");
+    this.deathAccuracy = documentRef.getElementById("death-accuracy");
+    this.deathBestWeapon = documentRef.getElementById("death-best-weapon");
     this.crosshair = documentRef.querySelector(".crosshair");
     this.hitMarker = documentRef.getElementById("hit-marker");
+    this.mobileControls = documentRef.getElementById("mobile-controls");
+    this.movePad = documentRef.getElementById("move-pad");
+    this.moveStick = documentRef.getElementById("move-stick");
+    this.lookPad = documentRef.getElementById("look-pad");
+    this.mobileFire = documentRef.getElementById("mobile-fire");
+    this.mobileJump = documentRef.getElementById("mobile-jump");
+    this.mobileReload = documentRef.getElementById("mobile-reload");
+    this.mobileWeaponButtons = Array.from(
+      documentRef.querySelectorAll(".mobile-weapon"),
+    );
     this.hitMarkerTimeout = null;
     this.crosshairScale = 1;
     this.damageFlash = 0;
+    this.mobileMode = false;
   }
 
   bindStart(handler) {
     this.button.addEventListener("click", handler);
+    this.deathButton?.addEventListener("click", handler);
   }
 
   setStatus(message) {
@@ -33,11 +50,14 @@ export class Hud {
 
   setReady() {
     this.button.disabled = false;
-    this.button.textContent = "Start Run";
+    this.button.textContent = this.mobileMode ? "Tap To Start" : "Start Run";
     this.setStatus("Wave sim loaded. Start the run when you're ready.");
     this.setAmmo(0, 0, "", "Weapon");
     this.deathOverlay.classList.remove("is-visible");
     this.damageVignette.classList.remove("is-dead");
+    if (this.deathButton) {
+      this.deathButton.textContent = this.mobileMode ? "Tap To Restart" : "Play Again";
+    }
     this.setSurvival({
       alive: 0,
       health: 100,
@@ -52,8 +72,12 @@ export class Hud {
     this.button.hidden = locked;
     this.setStatus(
       locked
-        ? "Pointer lock active. Survive the wave."
-        : "Pointer released. Click to re-enter the run.",
+        ? this.mobileMode
+          ? "Touch controls active. Survive the wave."
+          : "Pointer lock active. Survive the wave."
+        : this.mobileMode
+          ? "Tap start to resume the run."
+          : "Pointer released. Click to re-enter the run.",
     );
   }
 
@@ -66,14 +90,46 @@ export class Hud {
   setGameOver() {
     this.button.hidden = false;
     this.button.disabled = false;
-    this.button.textContent = "Restart Run";
+    this.button.textContent = this.mobileMode ? "Tap To Restart" : "Restart Run";
+    if (this.deathButton) {
+      this.deathButton.disabled = false;
+      this.deathButton.textContent = this.mobileMode ? "Tap To Restart" : "Play Again";
+    }
     this.setStatus("You were overrun. Restart the run.");
     this.deathOverlay.classList.add("is-visible");
     this.damageVignette.classList.add("is-dead");
   }
 
-  setGameOverSummary({ kills = 0, wave = 0 } = {}) {
+  setGameOverSummary({
+    accuracy = 0,
+    bestWeapon = "Weapon",
+    kills = 0,
+    wave = 0,
+  } = {}) {
     this.deathSummary.textContent = `Made it to wave ${wave} with ${kills} kills.`;
+    this.deathWave.textContent = String(wave);
+    this.deathKills.textContent = String(kills);
+    this.deathAccuracy.textContent = `${Math.round(accuracy)}%`;
+    this.deathBestWeapon.textContent = bestWeapon;
+  }
+
+  setMobileMode(enabled) {
+    this.mobileMode = enabled;
+    this.root.classList.toggle("is-mobile", enabled);
+    this.mobileControls?.setAttribute("aria-hidden", enabled ? "false" : "true");
+    this.button.textContent = enabled ? "Tap To Start" : "Enter Simulation";
+  }
+
+  getMobileControls() {
+    return {
+      fire: this.mobileFire,
+      jump: this.mobileJump,
+      lookPad: this.lookPad,
+      movePad: this.movePad,
+      moveStick: this.moveStick,
+      reload: this.mobileReload,
+      weaponButtons: this.mobileWeaponButtons,
+    };
   }
 
   setAmmo(current, reserve, state = "", weaponLabel = "Weapon") {
@@ -83,6 +139,12 @@ export class Hud {
     this.ammoReserve.textContent =
       reserve == null ? "--" : String(reserve).padStart(2, "0");
     this.ammoState.textContent = state;
+  }
+
+  setWeaponSlot(slotCode) {
+    this.mobileWeaponButtons.forEach((button) => {
+      button.classList.toggle("is-active", button.dataset.weaponSlot === slotCode);
+    });
   }
 
   showHitMarker() {

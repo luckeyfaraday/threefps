@@ -38,6 +38,7 @@ export class WeaponManager {
     this.reloadTimer = 0;
     this.isReloading = false;
     this.fireFeedback = 0;
+    this.runStats = this.createRunStats();
 
     this.viewModel.setWeaponProfile(this.currentWeapon.viewModel);
     this.cameraRig.setRecoilProfile(this.currentWeapon.recoil);
@@ -57,6 +58,7 @@ export class WeaponManager {
     this.reloadTimer = 0;
     this.isReloading = false;
     this.fireFeedback = 0;
+    this.runStats = this.createRunStats();
     this.viewModel.setWeaponProfile(this.currentWeapon.viewModel);
     this.cameraRig.setRecoilProfile(this.currentWeapon.recoil);
     this.viewModel.playIdle();
@@ -107,6 +109,7 @@ export class WeaponManager {
     if (this.currentWeapon.usesAmmo !== false) {
       this.ammoInMag -= 1;
     }
+    this.recordShot(this.currentWeapon.id);
     this.cooldown = this.currentWeapon.fireInterval;
     this.fireFeedback = 1;
     this.viewModel.playShoot(this.currentWeapon.viewModel.shootAnimationDuration);
@@ -130,6 +133,10 @@ export class WeaponManager {
 
       if (damageResult?.killed && this.targets.registerKill) {
         this.targets.registerKill(damageResult.score);
+      }
+
+      if (damageResult?.hit) {
+        this.recordHit(this.currentWeapon.id, damageResult.killed === true);
       }
 
       if (damageResult?.killed && damageResult.drop) {
@@ -206,6 +213,7 @@ export class WeaponManager {
       state,
       this.currentWeapon.label,
     );
+    this.hud.setWeaponSlot(this.currentWeapon.slot);
   }
 
   getPresentationState() {
@@ -213,6 +221,39 @@ export class WeaponManager {
       firing: this.fireFeedback,
       reloading: this.isReloading,
       ...this.currentWeapon.ui.crosshair,
+    };
+  }
+
+  getRunSummary() {
+    const totalShots = this.runStats.shots;
+    const totalHits = this.runStats.hits;
+    const bestWeaponStats =
+      this.runStats.byWeapon.reduce((best, weaponStats) => {
+        if (!best) {
+          return weaponStats;
+        }
+
+        if (weaponStats.kills !== best.kills) {
+          return weaponStats.kills > best.kills ? weaponStats : best;
+        }
+
+        if (weaponStats.hits !== best.hits) {
+          return weaponStats.hits > best.hits ? weaponStats : best;
+        }
+
+        if (weaponStats.shots !== best.shots) {
+          return weaponStats.shots > best.shots ? weaponStats : best;
+        }
+
+        return best;
+      }, null) ?? this.runStats.byWeapon[0];
+
+    return {
+      accuracy: totalShots > 0 ? (totalHits / totalShots) * 100 : 0,
+      bestWeapon: bestWeaponStats?.label ?? this.currentWeapon.label,
+      hits: totalHits,
+      kills: this.runStats.kills,
+      shots: totalShots,
     };
   }
 
@@ -283,5 +324,42 @@ export class WeaponManager {
 
   set reserveAmmo(value) {
     this.currentWeapon.state.reserveAmmo = value;
+  }
+
+  createRunStats() {
+    return {
+      hits: 0,
+      kills: 0,
+      shots: 0,
+      byWeapon: WEAPON_ORDER.map((weapon) => ({
+        id: weapon.id,
+        label: weapon.label,
+        hits: 0,
+        kills: 0,
+        shots: 0,
+      })),
+    };
+  }
+
+  recordShot(weaponId) {
+    this.runStats.shots += 1;
+    const weaponStats = this.runStats.byWeapon.find((weapon) => weapon.id === weaponId);
+    if (weaponStats) {
+      weaponStats.shots += 1;
+    }
+  }
+
+  recordHit(weaponId, killed = false) {
+    this.runStats.hits += 1;
+    const weaponStats = this.runStats.byWeapon.find((weapon) => weapon.id === weaponId);
+    if (!weaponStats) {
+      return;
+    }
+
+    weaponStats.hits += 1;
+    if (killed) {
+      this.runStats.kills += 1;
+      weaponStats.kills += 1;
+    }
   }
 }

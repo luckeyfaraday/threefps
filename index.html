@@ -66,10 +66,62 @@
           <p id="death-overlay-summary" class="death-overlay__summary">
             Restart to try another run.
           </p>
+          <div class="death-overlay__stats" aria-label="Run Summary">
+            <div class="death-overlay__stat">
+              <span class="death-overlay__stat-label">Highest Wave</span>
+              <span id="death-wave" class="death-overlay__stat-value">0</span>
+            </div>
+            <div class="death-overlay__stat">
+              <span class="death-overlay__stat-label">Kills</span>
+              <span id="death-kills" class="death-overlay__stat-value">0</span>
+            </div>
+            <div class="death-overlay__stat">
+              <span class="death-overlay__stat-label">Accuracy</span>
+              <span id="death-accuracy" class="death-overlay__stat-value">0%</span>
+            </div>
+            <div class="death-overlay__stat">
+              <span class="death-overlay__stat-label">Best Weapon</span>
+              <span id="death-best-weapon" class="death-overlay__stat-value">AK</span>
+            </div>
+          </div>
+          <button
+            id="death-restart-button"
+            class="hud__button death-overlay__button"
+            type="button"
+          >
+            Play Again
+          </button>
         </div>
 
         <div class="crosshair" aria-hidden="true"></div>
         <div id="hit-marker" class="hit-marker" aria-hidden="true"></div>
+
+        <div id="mobile-controls" class="mobile-controls" aria-hidden="true">
+          <div class="mobile-controls__left">
+            <div id="move-pad" class="touchpad touchpad--move">
+              <div id="move-stick" class="touchpad__stick"></div>
+            </div>
+          </div>
+
+          <div class="mobile-controls__right">
+            <div id="look-pad" class="lookpad">
+              <span class="lookpad__label">LOOK</span>
+            </div>
+
+            <div class="mobile-actions">
+              <button id="mobile-reload" class="mobile-button mobile-button--aux" type="button">R</button>
+              <button id="mobile-jump" class="mobile-button mobile-button--aux" type="button">Jump</button>
+              <button id="mobile-fire" class="mobile-button mobile-button--fire" type="button">Fire</button>
+            </div>
+
+            <div class="mobile-weapons">
+              <button class="mobile-weapon" data-weapon-slot="Digit1" type="button">1</button>
+              <button class="mobile-weapon" data-weapon-slot="Digit2" type="button">2</button>
+              <button class="mobile-weapon" data-weapon-slot="Digit3" type="button">3</button>
+              <button class="mobile-weapon" data-weapon-slot="Digit4" type="button">4</button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
