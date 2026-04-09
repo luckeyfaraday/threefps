@@ -69,7 +69,7 @@ export const GAME_CONFIG = {
     background: 0x88ccee,
     fogFar: 50,
     fogNear: 0,
-    modelPath: "./examples/models/gltf/collision-world.glb",
+    modelPath: "@generated/containment-arena",
   },
   weapon: {
     range: 200,
@@ -161,15 +161,15 @@ export const GAME_CONFIG = {
     routeAssist: {
       verticalThreshold: 1.35,
       nodes: [
-        { id: "lower_left", position: [-8, 0, -6], links: ["lower_mid"] },
-        { id: "lower_right", position: [8, 0, -6], links: ["lower_mid"] },
-        { id: "lower_mid", position: [0, 0, -5.5], links: ["lower_left", "lower_right", "stair_bottom"] },
-        { id: "stair_bottom", position: [0, 0, -8.2], links: ["lower_mid", "stair_mid"] },
-        { id: "stair_mid", position: [0, 1.4, -10.5], links: ["stair_bottom", "stair_top"] },
-        { id: "stair_top", position: [0, 2.8, -12.8], links: ["stair_mid", "upper_mid"] },
-        { id: "upper_mid", position: [0, 2.8, -15.5], links: ["stair_top", "upper_left", "upper_right"] },
-        { id: "upper_left", position: [-7.5, 2.8, -15.5], links: ["upper_mid"] },
-        { id: "upper_right", position: [7.5, 2.8, -15.5], links: ["upper_mid"] },
+        { id: "lower_left", position: [-8.4, 0, -6.4], links: ["lower_mid"] },
+        { id: "lower_right", position: [8.4, 0, -6.4], links: ["lower_mid"] },
+        { id: "lower_mid", position: [0, 0, -6.8], links: ["lower_left", "lower_right", "stair_bottom"] },
+        { id: "stair_bottom", position: [0, 0.2, -8.9], links: ["lower_mid", "stair_mid"] },
+        { id: "stair_mid", position: [0, 1.35, -10.7], links: ["stair_bottom", "stair_top"] },
+        { id: "stair_top", position: [0, 2.75, -12.95], links: ["stair_mid", "upper_mid"] },
+        { id: "upper_mid", position: [0, 2.8, -14.9], links: ["stair_top", "upper_left", "upper_right"] },
+        { id: "upper_left", position: [-7.2, 2.8, -15.2], links: ["upper_mid"] },
+        { id: "upper_right", position: [7.2, 2.8, -15.2], links: ["upper_mid"] },
       ],
     },
     spawnPoints: [

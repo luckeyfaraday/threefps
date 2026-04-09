@@ -5,9 +5,7 @@ import { clone } from "three/addons/utils/SkeletonUtils.js";
 import { GAME_CONFIG } from "../core/config.js";
 import { AIState, StateMachine } from "../ai/stateMachine.js";
 import { Awareness } from "../ai/awareness.js";
-import { Tactics } from "../ai/tactics.js";
 import { SquadManager } from "../ai/squad.js";
-import { NavGraph } from "../ai/navGraph.js";
 
 const UP = new THREE.Vector3(0, 1, 0);
 const DEATH_DROP = 0.32;
@@ -17,35 +15,25 @@ const groundProbeDirection = new THREE.Vector3(0, -1, 0);
 const visibilityProbe = new THREE.Raycaster();
 const visibilityOrigin = new THREE.Vector3();
 const visibilityDirection = new THREE.Vector3();
-const pursuitProbe = new THREE.Raycaster();
-const pursuitProbeOrigin = new THREE.Vector3();
-const pursuitProbeDirection = new THREE.Vector3();
 const moveDirection = new THREE.Vector3();
-const toPlayerVector = new THREE.Vector3();
+const progressVector = new THREE.Vector3();
 const muzzleForward = new THREE.Vector3();
 const shotProbe = new THREE.Raycaster();
 const shotProbeOrigin = new THREE.Vector3();
 const shotProbeDirection = new THREE.Vector3();
-const pathPrev = new THREE.Vector3();
-const pathCurrent = new THREE.Vector3();
-const pathNext = new THREE.Vector3();
-const pathSegmentA = new THREE.Vector3();
-const pathSegmentB = new THREE.Vector3();
 const black = new THREE.Color(0x000000);
 
 class Zombie {
-  constructor(scene, profile, spawnPoint, archetype, navGraph, squadManager) {
+  constructor(scene, profile, spawnPoint, archetype, squadManager) {
     this.scene = scene;
     this.profile = profile;
     this.archetype = archetype;
-    this.navGraph = navGraph;
     this.squadManager = squadManager;
     this.awareness = new Awareness({
       sightRange: profile.sightRange ?? 30,
       hearingRange: profile.hearingRange ?? 15,
       memoryDuration: profile.memoryDuration ?? 8
     });
-    this.tactics = new Tactics();
     this.stateMachine = new StateMachine(this, AIState.PURSUE);
     this.lastKnownPlayerPos = null;
     this.squadId = null;
@@ -64,13 +52,13 @@ class Zombie {
     this.velocity = new THREE.Vector3();
     this.correction = new THREE.Vector3();
     this.steerDirection = new THREE.Vector3();
+    this.turnCommitSign = 0;
+    this.turnCommitTimer = 0;
+    this.noProgressTimer = 0;
+    this.lastGoalDistance = Number.POSITIVE_INFINITY;
+    this.isStairCommit = false;
     this.onFloor = false;
     this.targetDirection = null;
-    this.activePath = [];
-    this.pathIndex = 0;
-    this.activeWaypoint = null;
-    this.lastWaypointTarget = null;
-    this.repathCooldown = 0;
     this.pendingShot = null;
     this.shotEffects = [];
     this.segmentHeight = Math.max(0.1, profile.height - profile.radius * 2);
@@ -162,13 +150,8 @@ class Zombie {
   }
 
   onStateChange(from, to) {
-    if (from !== to && to !== AIState.PURSUE) {
-      this.activePath = [];
-      this.pathIndex = 0;
-      this.activeWaypoint = null;
-      this.lastWaypointTarget = null;
-      this.repathCooldown = 0;
-    }
+    void from;
+    void to;
   }
 
   distanceToPlayer() {
@@ -244,8 +227,8 @@ class Zombie {
     this.mixer.update(deltaTime);
     this.attackTimer = Math.max(0, this.attackTimer - deltaTime);
     this.transientTimer = Math.max(0, this.transientTimer - deltaTime);
-    this.repathCooldown = Math.max(0, this.repathCooldown - deltaTime);
     this.flinchYaw = THREE.MathUtils.damp(this.flinchYaw, 0, 10, deltaTime);
+    this.turnCommitTimer = Math.max(0, this.turnCommitTimer - deltaTime);
     this.updateShotEffects(deltaTime);
 
     if (this.transientTimer === 0 && this.transientFallback && !this.dead) {
@@ -328,17 +311,20 @@ class Zombie {
       resolvedDamage = this.updatePendingShot(deltaTime, playerPosition, collisionWorld);
       wantsMove = false;
       this.targetDirection = null;
+      this.isStairCommit = false;
     }
 
     switch (state) {
       case AIState.IDLE:
         this.targetDirection = null;
+        this.isStairCommit = false;
         if (this.transientTimer === 0) {
           this.playLoop(this.profile.animation.idle);
         }
         break;
 
       case AIState.ALERT:
+        this.isStairCommit = false;
         if (this.awareness.getLastHeardPosition()) {
           this.targetDirection = new THREE.Vector3()
             .subVectors(this.awareness.getLastHeardPosition(), this.collider.start)
@@ -354,16 +340,14 @@ class Zombie {
         break;
 
       case AIState.PURSUE: {
-        const shouldUseNavPath = this.shouldUsePursuitPath(playerPosition, verticalGap, dist);
-        const pursueTarget = this.getPursuitTarget(
-          playerPosition,
-          shouldUseNavPath,
-          collisionWorld,
-        );
+        const stairRouteTarget = this.getStairRouteTarget(playerPosition, verticalGap);
+        const pursueTarget = stairRouteTarget ?? playerPosition;
+        this.isStairCommit = stairRouteTarget !== null;
 
         this.targetDirection = new THREE.Vector3()
           .subVectors(pursueTarget, this.collider.start)
           .normalize();
+        this.updatePursuitProgress(pursueTarget, this.targetDirection, deltaTime, this.isStairCommit);
 
         const inAttackRange = dist <= this.profile.attackRange;
         const goodVertical = verticalGap <= (this.profile.attackHeightTolerance ?? 1.8);
@@ -376,7 +360,12 @@ class Zombie {
         ) {
           if (this.profile.attackType === "ranged") {
             const preferredRange = this.profile.preferredRange ?? this.profile.attackRange * 0.6;
-            if (hasSight && dist >= preferredRange * 0.8) {
+            const retreatRange = this.profile.retreatRange ?? preferredRange * 0.55;
+            if (
+              hasSight &&
+              dist <= preferredRange * 1.2 &&
+              dist >= retreatRange * 1.05
+            ) {
               attackNow = true;
             }
           } else {
@@ -388,9 +377,22 @@ class Zombie {
 
       case AIState.ATTACK:
         this.targetDirection = null;
+        this.isStairCommit = false;
         if (this.distanceToPlayer() > this.profile.attackRange * 1.1) {
           this.stateMachine.setState(AIState.PURSUE);
           return 0;
+        }
+
+        if (this.profile.attackType === "ranged") {
+          const preferredRange = this.profile.preferredRange ?? this.profile.attackRange * 0.6;
+          const retreatRange = this.profile.retreatRange ?? preferredRange * 0.55;
+          if (
+            this.distanceToPlayer() > preferredRange * 1.2 ||
+            this.distanceToPlayer() < retreatRange * 0.95
+          ) {
+            this.stateMachine.setState(AIState.PURSUE);
+            return 0;
+          }
         }
 
         const canAttack =
@@ -425,6 +427,7 @@ class Zombie {
         this.targetDirection,
         collisionWorld,
         deltaTime,
+        { stairCommit: this.isStairCommit },
       );
       moveDirection.copy(chosenDirection);
 
@@ -448,6 +451,8 @@ class Zombie {
     } else {
       moveDirection.set(0, 0, 0);
       this.steerDirection.set(0, 0, 0);
+      this.noProgressTimer = 0;
+      this.lastGoalDistance = Number.POSITIVE_INFINITY;
       this.velocity.x = THREE.MathUtils.damp(this.velocity.x, 0, 14, deltaTime);
       this.velocity.z = THREE.MathUtils.damp(this.velocity.z, 0, 14, deltaTime);
     }
@@ -553,257 +558,119 @@ class Zombie {
     return this.profile.attackDamage ?? 0;
   }
 
-  shouldUsePursuitPath(playerPosition, verticalGap, dist) {
-    if (!this.navGraph?.ready) {
-      return false;
+  getArenaLevel(y) {
+    const stairMidY = 1.35;
+    const upperThreshold = stairMidY + 0.55;
+    const lowerThreshold = stairMidY - 0.55;
+
+    if (y >= upperThreshold) {
+      return "upper";
+    }
+    if (y <= lowerThreshold) {
+      return "lower";
+    }
+    return "stairs";
+  }
+
+  getStairRouteTarget(playerPosition, verticalGap) {
+    const routeNodes = GAME_CONFIG.survival.routeAssist?.nodes ?? [];
+
+    if (routeNodes.length === 0) {
+      return null;
+    }
+
+    const nodeMap = new Map(routeNodes.map((node) => [node.id, node.position]));
+    const stairBottom = nodeMap.get("stair_bottom");
+    const stairMid = nodeMap.get("stair_mid");
+    const stairTop = nodeMap.get("stair_top");
+    const upperMid = nodeMap.get("upper_mid");
+    const lowerMid = nodeMap.get("lower_mid");
+
+    if (!stairBottom || !stairMid || !stairTop) {
+      return null;
+    }
+
+    const currentFootY = this.getFootY();
+    const zombieLevel = this.getArenaLevel(currentFootY);
+    const playerLevel = this.getArenaLevel(playerPosition.y);
+
+    if (zombieLevel === playerLevel) {
+      return null;
     }
 
     const verticalThreshold =
       GAME_CONFIG.survival.routeAssist?.verticalThreshold ?? 1.35;
-
-    if (this.activePath.length > 0 && this.pathIndex < this.activePath.length) {
-      return true;
-    }
-
-    if (dist > this.profile.attackRange * 1.2) {
-      return true;
-    }
-
-    if (verticalGap > verticalThreshold * 0.6) {
-      return true;
-    }
-
-    if (this.activeWaypoint || this.activePath.length > 0) {
-      const waypointDistance = this.activeWaypoint
-        ? this.collider.start.distanceTo(this.activeWaypoint)
-        : Infinity;
-      if (waypointDistance > 1.1) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  getPursuitTarget(playerPosition, shouldUseNavPath, collisionWorld) {
-    if (!shouldUseNavPath || !this.navGraph?.ready) {
-      this.activePath = [];
-      this.pathIndex = 0;
-      this.activeWaypoint = null;
-      this.lastWaypointTarget = null;
-      return playerPosition;
-    }
-
-    const climbingPath = this.isClimbingPath(playerPosition);
-    const arrivalRadius = climbingPath ? 1.35 : 1.05;
-    while (
-      this.pathIndex < this.activePath.length &&
-      this.collider.start.distanceTo(this.activePath[this.pathIndex]) <= arrivalRadius
+    if (
+      verticalGap <= verticalThreshold &&
+      zombieLevel !== "stairs" &&
+      playerLevel !== "stairs"
     ) {
-      this.pathIndex += 1;
-    }
-
-    if (this.pathIndex >= this.activePath.length) {
-      this.activePath = [];
-      this.pathIndex = 0;
-      this.activeWaypoint = null;
-    } else {
-      this.activeWaypoint = this.activePath[this.pathIndex];
-    }
-
-    const playerMoved =
-      this.lastWaypointTarget &&
-      this.lastWaypointTarget.distanceTo(playerPosition) > 2.5;
-    const shouldRepath =
-      this.activePath.length === 0 ||
-      playerMoved ||
-      (this.repathCooldown === 0 && this.stuckTimer > 0.4);
-
-    if (shouldRepath) {
-      const path = this.navGraph.findPath(
-        this.collider.start,
-        playerPosition,
-      );
-
-      this.activePath = this.optimizePath(path ?? [], playerPosition);
-      this.pathIndex = 0;
-      this.activeWaypoint = this.activePath[0] ?? null;
-      this.lastWaypointTarget = playerPosition.clone();
-      this.repathCooldown = 0.35;
-    }
-
-    if (this.activePath.length > 1) {
-      this.activeWaypoint = this.getSmoothedWaypoint(
-        playerPosition,
-        collisionWorld,
-        this.isClimbingPath(playerPosition),
-      );
-    }
-
-    return this.activeWaypoint ?? playerPosition;
-  }
-
-  getSmoothedWaypoint(playerPosition, collisionWorld, climbingPath = false) {
-    let furthestVisible = this.activePath[this.pathIndex] ?? null;
-    if (!furthestVisible) {
       return null;
     }
 
-    for (
-      let index = this.pathIndex;
-      index < Math.min(this.activePath.length, this.pathIndex + 6);
-      index += 1
-    ) {
-      const candidate = this.activePath[index];
-      if (
-        !this.isPathSegmentBlocked(candidate, collisionWorld) &&
-        this.isReasonablePathStep(candidate, furthestVisible)
-      ) {
-        furthestVisible = candidate;
-        continue;
+    if (playerLevel === "upper") {
+      if (zombieLevel === "lower") {
+        return new THREE.Vector3(...stairBottom);
       }
-      break;
-    }
-
-    if (
-      !climbingPath &&
-      playerPosition &&
-      !this.isPathSegmentBlocked(playerPosition, collisionWorld) &&
-      Math.abs(playerPosition.y - this.getFootY()) <=
-        (this.profile.attackHeightTolerance ?? 1.8) * 1.35 &&
-      this.collider.start.distanceTo(playerPosition) <= this.profile.attackRange * 2.4
-    ) {
-      return playerPosition;
-    }
-
-    return furthestVisible;
-  }
-
-  optimizePath(rawPath, playerPosition) {
-    const points = [];
-
-    for (const point of rawPath) {
-      const vector = point.isVector3
-        ? point.clone()
-        : Array.isArray(point)
-          ? new THREE.Vector3(...point)
-          : new THREE.Vector3(point.x, point.y, point.z);
-
-      if (points.length === 0) {
-        if (this.collider.start.distanceTo(vector) > 0.85) {
-          points.push(vector);
+      if (zombieLevel === "stairs") {
+        if (currentFootY < stairMid[1]) {
+          return new THREE.Vector3(...stairMid);
         }
-        continue;
+        return new THREE.Vector3(...stairTop);
       }
-
-      if (points[points.length - 1].distanceTo(vector) > 0.7) {
-        points.push(vector);
+      if (upperMid && this.collider.start.distanceTo(new THREE.Vector3(...upperMid)) > 2.6) {
+        return new THREE.Vector3(...upperMid);
       }
+      return null;
     }
 
-    if (points.length < 3) {
-      return points;
-    }
-
-    const simplified = [points[0]];
-    for (let index = 1; index < points.length - 1; index += 1) {
-      pathPrev.copy(simplified[simplified.length - 1]);
-      pathCurrent.copy(points[index]);
-      pathNext.copy(points[index + 1]);
-
-      pathSegmentA.subVectors(pathCurrent, pathPrev);
-      pathSegmentB.subVectors(pathNext, pathCurrent);
-      const verticalChange =
-        Math.max(
-          Math.abs(pathCurrent.y - pathPrev.y),
-          Math.abs(pathNext.y - pathCurrent.y),
-        );
-
-      pathSegmentA.y = 0;
-      pathSegmentB.y = 0;
-      const planarLengthA = pathSegmentA.length();
-      const planarLengthB = pathSegmentB.length();
-
-      if (planarLengthA < 0.001 || planarLengthB < 0.001) {
-        continue;
+    if (playerLevel === "lower") {
+      if (zombieLevel === "upper") {
+        if (upperMid && this.collider.start.distanceTo(new THREE.Vector3(...upperMid)) > 2.4) {
+          return new THREE.Vector3(...upperMid);
+        }
+        return new THREE.Vector3(...stairTop);
       }
-
-      const turn = pathSegmentA.normalize().dot(pathSegmentB.normalize());
-      const sameLevel = verticalChange < 0.45;
-      if (sameLevel && turn > 0.985) {
-        continue;
+      if (zombieLevel === "stairs") {
+        if (currentFootY > stairMid[1]) {
+          return new THREE.Vector3(...stairMid);
+        }
+        return new THREE.Vector3(...stairBottom);
       }
-
-      simplified.push(points[index]);
+      if (lowerMid && this.collider.start.distanceTo(new THREE.Vector3(...lowerMid)) > 2.4) {
+        return new THREE.Vector3(...lowerMid);
+      }
+      return null;
     }
 
-    simplified.push(points[points.length - 1]);
-
-    if (
-      playerPosition &&
-      simplified.length > 0 &&
-      simplified[simplified.length - 1].distanceTo(playerPosition) > 1.2
-    ) {
-      simplified.push(playerPosition.clone());
-    }
-
-    return simplified;
+    return null;
   }
 
-  isClimbingPath(playerPosition) {
-    if (this.activePath.length === 0 || !playerPosition) {
-      return false;
+  updatePursuitProgress(targetPosition, targetDirection, deltaTime, stairCommit) {
+    progressVector.subVectors(targetPosition, this.collider.start);
+    progressVector.y = 0;
+    const goalDistance = progressVector.length();
+
+    if (!Number.isFinite(this.lastGoalDistance)) {
+      this.lastGoalDistance = goalDistance;
+      return;
     }
 
-    const currentFootY = this.getFootY();
-    const playerRise = playerPosition.y - currentFootY;
-    if (playerRise <= 0.6) {
-      return false;
+    const improved = goalDistance < this.lastGoalDistance - 0.08;
+    this.noProgressTimer = improved ? 0 : this.noProgressTimer + deltaTime;
+    this.lastGoalDistance = goalDistance;
+
+    if (this.noProgressTimer < (stairCommit ? 0.28 : 0.6) || this.turnCommitTimer > 0) {
+      return;
     }
 
-    for (let index = this.pathIndex; index < this.activePath.length; index += 1) {
-      const point = this.activePath[index];
-      if (point.y - currentFootY > 0.55) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  isReasonablePathStep(candidate, previousCandidate) {
-    if (!previousCandidate) {
-      return true;
-    }
-
-    const verticalGap = Math.abs(candidate.y - previousCandidate.y);
-    const planarGap = Math.hypot(
-      candidate.x - previousCandidate.x,
-      candidate.z - previousCandidate.z,
-    );
-
-    return verticalGap <= 2.4 && planarGap <= 12;
-  }
-
-  isPathSegmentBlocked(targetPosition, collisionWorld) {
-    pursuitProbeOrigin.set(
-      this.collider.start.x,
-      this.getFootY() + (this.profile.eyeHeight ?? 1) * 0.6,
-      this.collider.start.z,
-    );
-    pursuitProbeDirection.subVectors(targetPosition, pursuitProbeOrigin);
-    pursuitProbeDirection.y = 0;
-
-    const rayDistance = pursuitProbeDirection.length();
-    if (rayDistance <= 0.0001) {
-      return false;
-    }
-
-    pursuitProbeDirection.normalize();
-    pursuitProbe.set(pursuitProbeOrigin, pursuitProbeDirection);
-    pursuitProbe.far = Math.min(rayDistance, 5);
-
-    return pursuitProbe.intersectObjects(collisionWorld.getShootables(), true).length > 0;
+    const currentTurn =
+      this.steerDirection.lengthSq() > 0.001
+        ? Math.sign(targetDirection.x * this.steerDirection.z - targetDirection.z * this.steerDirection.x)
+        : 0;
+    this.turnCommitSign = currentTurn || (Math.random() < 0.5 ? -1 : 1);
+    this.turnCommitTimer = stairCommit ? 0.9 : 0.65;
+    this.noProgressTimer = 0;
   }
 
   applyVelocity(deltaTime) {
@@ -818,21 +685,24 @@ class Zombie {
     this.collider.translate(this.correction.copy(this.velocity).multiplyScalar(deltaTime));
   }
 
-  chooseMoveDirection(targetDirection, collisionWorld, deltaTime) {
+  chooseMoveDirection(targetDirection, collisionWorld, deltaTime, options = {}) {
     if (targetDirection.lengthSq() === 0) {
       return new THREE.Vector3();
     }
 
+    const stairCommit = options.stairCommit ?? false;
     const seek = targetDirection.clone().normalize();
-    const probeCount = 7;
-    const spreadAngle = Math.PI * 0.5;
-    const rayLength = 2.5;
+    const probeCount = stairCommit ? 5 : 7;
+    const spreadAngle = stairCommit ? Math.PI * 0.28 : Math.PI * 0.5;
+    const rayLength = stairCommit ? 2 : 2.5;
     const probeOrigin = this.collider.start.clone();
     probeOrigin.y = this.getFootY() + this.profile.eyeHeight * 0.75;
 
     const steerResult = new THREE.Vector3();
     const steerForce = new THREE.Vector3();
     const probeHits = [];
+    let leftPenalty = 0;
+    let rightPenalty = 0;
 
     for (let i = 0; i < probeCount; i++) {
       const angle = -spreadAngle / 2 + (spreadAngle / (probeCount - 1)) * i;
@@ -846,7 +716,13 @@ class Zombie {
         const hit = hits[0];
         const penetration = rayLength - hit.distance;
         if (penetration > 0) {
-          probeHits.push({ penetration, dir: steerProbeDir.clone() });
+          const side = Math.sign(steerProbeDir.x * seek.z - steerProbeDir.z * seek.x);
+          if (side < 0) {
+            leftPenalty += penetration;
+          } else if (side > 0) {
+            rightPenalty += penetration;
+          }
+          probeHits.push({ penetration, dir: steerProbeDir.clone(), side });
         }
       }
     }
@@ -862,8 +738,23 @@ class Zombie {
 
       const perpendicular = new THREE.Vector3().crossVectors(UP, seek).normalize();
       for (const hit of probeHits) {
-        const lateral = Math.sign(hit.dir.dot(perpendicular));
+        const lateral = hit.side || Math.sign(hit.dir.dot(perpendicular));
         steerForce.add(perpendicular.clone().multiplyScalar(lateral * hit.penetration * 1.5));
+      }
+
+      const shouldChooseSide = stairCommit || this.turnCommitTimer > 0 || this.stuckTimer > 0.25;
+      if (shouldChooseSide) {
+        if (this.turnCommitTimer === 0) {
+          if (Math.abs(leftPenalty - rightPenalty) > 0.08) {
+            this.turnCommitSign = leftPenalty < rightPenalty ? -1 : 1;
+          } else if (this.turnCommitSign === 0) {
+            this.turnCommitSign = Math.random() < 0.5 ? -1 : 1;
+          }
+          this.turnCommitTimer = stairCommit ? 0.45 : 0.3;
+        }
+
+        const commitStrength = stairCommit ? 1.2 : 0.7;
+        steerForce.addScaledVector(perpendicular, this.turnCommitSign * commitStrength);
       }
 
       steerResult.copy(seek).add(steerForce);
@@ -871,6 +762,10 @@ class Zombie {
         desiredDirection.copy(seek);
       } else {
         desiredDirection.copy(steerResult.normalize());
+      }
+
+      if (stairCommit) {
+        desiredDirection.lerp(seek, 0.42).normalize();
       }
     }
 
@@ -1156,12 +1051,12 @@ class Zombie {
     this.velocity.set(0, 0, 0);
     this.correction.set(0, 0, 0);
     this.steerDirection.set(0, 0, 0);
+    this.turnCommitSign = 0;
+    this.turnCommitTimer = 0;
+    this.noProgressTimer = 0;
+    this.lastGoalDistance = Number.POSITIVE_INFINITY;
+    this.isStairCommit = false;
     this.targetDirection = null;
-    this.activePath = [];
-    this.pathIndex = 0;
-    this.activeWaypoint = null;
-    this.lastWaypointTarget = null;
-    this.repathCooldown = 0;
     this.stuckTimer = 0;
     this.lastFootPosition.set(x, y, z);
   }
@@ -1202,13 +1097,10 @@ export class ZombieManager {
     this.intermissionTimer = GAME_CONFIG.survival.initialDelay;
     this.status = "Intermission";
     this.spawnCursor = 0;
-    this.navGraph = new NavGraph();
     this.squadManager = new SquadManager();
   }
 
   async load() {
-    await this.navGraph.load();
-
     const uniquePaths = [
       ...new Set(
         Object.values(GAME_CONFIG.zombies)
@@ -1346,7 +1238,7 @@ export class ZombieManager {
     if (!archetype) {
       return;
     }
-    const zombie = new Zombie(this.scene, profile, spawnPoint, archetype, this.navGraph, this.squadManager);
+    const zombie = new Zombie(this.scene, profile, spawnPoint, archetype, this.squadManager);
     this.zombies.push(zombie);
 
     if (this.wave >= 2) {
