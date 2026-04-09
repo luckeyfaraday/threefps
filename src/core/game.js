@@ -44,6 +44,7 @@ export class Game {
     this.gameOver = false;
     this.runStarted = false;
     this.highestWave = 0;
+    this.lastAnnouncedWave = 0;
   }
 
   async init() {
@@ -135,6 +136,7 @@ export class Game {
     this.gameOver = false;
     this.runStarted = false;
     this.highestWave = 0;
+    this.lastAnnouncedWave = 0;
     this.hud.clearGameOverState();
     this.playerState.reset();
     this.player.spawn();
@@ -202,6 +204,14 @@ export class Game {
         ? this.zombies.getStatus()
         : this.zombies.update(clampedDeltaTime, this.sceneKit.camera.position);
     this.highestWave = Math.max(this.highestWave, survivalState.wave);
+    if (
+      this.runStarted &&
+      !this.gameOver &&
+      survivalState.wave > this.lastAnnouncedWave
+    ) {
+      this.lastAnnouncedWave = survivalState.wave;
+      this.hud.showWaveBanner(survivalState.wave);
+    }
 
     if (simulationActive && survivalState.damageToPlayer > 0) {
       this.playerAudio.playHurt(

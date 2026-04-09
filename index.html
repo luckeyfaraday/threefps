@@ -32,14 +32,40 @@
         </div>
 
         <div class="ammo">
-          <span id="ammo-weapon" class="ammo__label">Carbine</span>
-          <span id="ammo-current" class="ammo__current">00</span>
-          <span class="ammo__divider">/</span>
-          <span id="ammo-reserve" class="ammo__reserve">00</span>
-          <span id="ammo-state" class="ammo__state"></span>
+          <div class="ammo__header">
+            <span id="ammo-weapon" class="ammo__label">Carbine</span>
+            <span id="ammo-state" class="ammo__state"></span>
+          </div>
+          <div class="ammo__counts">
+            <span id="ammo-current" class="ammo__current">00</span>
+            <span class="ammo__divider">/</span>
+            <span id="ammo-reserve" class="ammo__reserve">00</span>
+          </div>
+          <div class="ammo__slots" aria-label="Weapons">
+            <button class="weapon-slot" data-weapon-slot="Digit1" type="button">
+              <span class="weapon-slot__index">1</span>
+              <span class="weapon-slot__label">AK</span>
+            </button>
+            <button class="weapon-slot" data-weapon-slot="Digit2" type="button">
+              <span class="weapon-slot__index">2</span>
+              <span class="weapon-slot__label">SMG</span>
+            </button>
+            <button class="weapon-slot" data-weapon-slot="Digit3" type="button">
+              <span class="weapon-slot__index">3</span>
+              <span class="weapon-slot__label">HG</span>
+            </button>
+            <button class="weapon-slot" data-weapon-slot="Digit4" type="button">
+              <span class="weapon-slot__index">4</span>
+              <span class="weapon-slot__label">KN</span>
+            </button>
+          </div>
         </div>
 
         <div class="survival">
+          <div class="survival__header">
+            <p class="survival__heading">Run Status</p>
+            <p id="survival-status" class="survival__status">Intermission</p>
+          </div>
           <div class="survival__stat">
             <span class="survival__label">Wave</span>
             <span id="survival-wave" class="survival__value">0</span>
@@ -56,10 +82,21 @@
             <span class="survival__label">Alive</span>
             <span id="survival-alive" class="survival__value">0</span>
           </div>
-          <p id="survival-status" class="survival__status">Intermission</p>
+          <div class="health-meter" aria-label="Health">
+            <div class="health-meter__bar">
+              <div id="health-meter-fill" class="health-meter__fill"></div>
+            </div>
+            <div class="health-meter__labels">
+              <span class="health-meter__label">Vitals</span>
+              <span id="health-meter-value" class="health-meter__value">100 HP</span>
+            </div>
+          </div>
         </div>
 
         <div id="damage-vignette" class="damage-vignette" aria-hidden="true"></div>
+        <div id="wave-banner" class="wave-banner" aria-live="polite" aria-atomic="true">
+          Wave 1
+        </div>
         <div id="death-overlay" class="death-overlay" aria-hidden="true">
           <p class="death-overlay__eyebrow">Run Over</p>
           <h2 class="death-overlay__title">Overrun</h2>

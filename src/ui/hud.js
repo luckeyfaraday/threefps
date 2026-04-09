@@ -9,12 +9,18 @@ export class Hud {
     this.ammoCurrent = documentRef.getElementById("ammo-current");
     this.ammoReserve = documentRef.getElementById("ammo-reserve");
     this.ammoState = documentRef.getElementById("ammo-state");
+    this.weaponButtons = Array.from(
+      documentRef.querySelectorAll(".weapon-slot, .mobile-weapon"),
+    );
     this.waveValue = documentRef.getElementById("survival-wave");
     this.healthValue = documentRef.getElementById("survival-health");
     this.killsValue = documentRef.getElementById("survival-kills");
     this.aliveValue = documentRef.getElementById("survival-alive");
     this.survivalStatus = documentRef.getElementById("survival-status");
+    this.healthMeterFill = documentRef.getElementById("health-meter-fill");
+    this.healthMeterValue = documentRef.getElementById("health-meter-value");
     this.damageVignette = documentRef.getElementById("damage-vignette");
+    this.waveBanner = documentRef.getElementById("wave-banner");
     this.deathOverlay = documentRef.getElementById("death-overlay");
     this.deathSummary = documentRef.getElementById("death-overlay-summary");
     this.deathWave = documentRef.getElementById("death-wave");
@@ -30,12 +36,11 @@ export class Hud {
     this.mobileFire = documentRef.getElementById("mobile-fire");
     this.mobileJump = documentRef.getElementById("mobile-jump");
     this.mobileReload = documentRef.getElementById("mobile-reload");
-    this.mobileWeaponButtons = Array.from(
-      documentRef.querySelectorAll(".mobile-weapon"),
-    );
+    this.mobileWeaponButtons = Array.from(documentRef.querySelectorAll(".mobile-weapon"));
     this.hitMarkerTimeout = null;
     this.crosshairScale = 1;
     this.damageFlash = 0;
+    this.waveBannerTimer = 0;
     this.mobileMode = false;
   }
 
@@ -104,6 +109,16 @@ export class Hud {
     this.damageVignette.classList.remove("is-dead");
   }
 
+  showWaveBanner(wave) {
+    if (!this.waveBanner || wave <= 0) {
+      return;
+    }
+
+    this.waveBanner.textContent = `Wave ${wave}`;
+    this.waveBanner.classList.add("is-visible");
+    this.waveBannerTimer = 2.1;
+  }
+
   setGameOverSummary({
     accuracy = 0,
     bestWeapon = "Weapon",
@@ -146,7 +161,7 @@ export class Hud {
   }
 
   setWeaponSlot(slotCode) {
-    this.mobileWeaponButtons.forEach((button) => {
+    this.weaponButtons.forEach((button) => {
       button.classList.toggle("is-active", button.dataset.weaponSlot === slotCode);
     });
   }
@@ -178,6 +193,10 @@ export class Hud {
     this.killsValue.textContent = String(kills);
     this.aliveValue.textContent = String(alive);
     this.survivalStatus.textContent = status;
+    const healthRatio = Math.max(0, Math.min(1, health / 100));
+    this.healthMeterFill?.style.setProperty("--health-fill", healthRatio.toFixed(3));
+    this.healthMeterValue.textContent = `${health} HP`;
+    this.root.classList.toggle("is-critical", healthRatio <= 0.3);
   }
 
   pulseDamage(intensity = 0.2) {
@@ -190,6 +209,13 @@ export class Hud {
       "--damage-opacity",
       this.damageFlash.toFixed(3),
     );
+
+    if (this.waveBannerTimer > 0) {
+      this.waveBannerTimer = Math.max(0, this.waveBannerTimer - deltaTime);
+      if (this.waveBannerTimer === 0) {
+        this.waveBanner.classList.remove("is-visible");
+      }
+    }
   }
 
   updateCrosshair(
