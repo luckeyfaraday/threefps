@@ -22,6 +22,15 @@ const pursuitProbeOrigin = new THREE.Vector3();
 const pursuitProbeDirection = new THREE.Vector3();
 const moveDirection = new THREE.Vector3();
 const toPlayerVector = new THREE.Vector3();
+const muzzleForward = new THREE.Vector3();
+const shotProbe = new THREE.Raycaster();
+const shotProbeOrigin = new THREE.Vector3();
+const shotProbeDirection = new THREE.Vector3();
+const pathPrev = new THREE.Vector3();
+const pathCurrent = new THREE.Vector3();
+const pathNext = new THREE.Vector3();
+const pathSegmentA = new THREE.Vector3();
+const pathSegmentB = new THREE.Vector3();
 const black = new THREE.Color(0x000000);
 
 class Zombie {
@@ -62,6 +71,8 @@ class Zombie {
     this.activeWaypoint = null;
     this.lastWaypointTarget = null;
     this.repathCooldown = 0;
+    this.pendingShot = null;
+    this.shotEffects = [];
     this.segmentHeight = Math.max(0.1, profile.height - profile.radius * 2);
     this.collider = new Capsule(
       new THREE.Vector3(
@@ -114,6 +125,10 @@ class Zombie {
     });
 
     this.scene.add(this.group);
+    this.shotFlashGeometry = profile.attackType === "ranged"
+      ? new THREE.IcosahedronGeometry(0.08, 1)
+      : null;
+    this.shotAudio = this.createShotAudio();
     this.playLoop(this.profile.animation.idle);
   }
 
@@ -231,6 +246,7 @@ class Zombie {
     this.transientTimer = Math.max(0, this.transientTimer - deltaTime);
     this.repathCooldown = Math.max(0, this.repathCooldown - deltaTime);
     this.flinchYaw = THREE.MathUtils.damp(this.flinchYaw, 0, 10, deltaTime);
+    this.updateShotEffects(deltaTime);
 
     if (this.transientTimer === 0 && this.transientFallback && !this.dead) {
       const nextLoop = this.transientFallback;
@@ -306,6 +322,13 @@ class Zombie {
     );
     let wantsMove = true;
     let attackNow = false;
+    let resolvedDamage = 0;
+
+    if (this.pendingShot) {
+      resolvedDamage = this.updatePendingShot(deltaTime, playerPosition, collisionWorld);
+      wantsMove = false;
+      this.targetDirection = null;
+    }
 
     switch (state) {
       case AIState.IDLE:
@@ -345,7 +368,12 @@ class Zombie {
         const inAttackRange = dist <= this.profile.attackRange;
         const goodVertical = verticalGap <= (this.profile.attackHeightTolerance ?? 1.8);
 
-        if (inAttackRange && goodVertical && this.attackTimer === 0) {
+        if (
+          inAttackRange &&
+          goodVertical &&
+          this.attackTimer === 0 &&
+          !this.pendingShot
+        ) {
           if (this.profile.attackType === "ranged") {
             const preferredRange = this.profile.preferredRange ?? this.profile.attackRange * 0.6;
             if (hasSight && dist >= preferredRange * 0.8) {
@@ -368,6 +396,7 @@ class Zombie {
         const canAttack =
           verticalGap <= (this.profile.attackHeightTolerance ?? 1.8) &&
           this.attackTimer === 0 &&
+          !this.pendingShot &&
           (this.profile.attackType !== "ranged" || hasSight);
 
         if (canAttack) {
@@ -377,14 +406,18 @@ class Zombie {
     }
 
     if (attackNow) {
-      this.attackTimer = this.profile.attackCooldown;
-      this.playTransient(
-        this.profile.animation.attack,
-        this.getClipDuration(this.profile.animation.attack) || 0.42,
-        this.profile.animation.idle,
-      );
-      this.stateMachine.setState(AIState.ATTACK);
-      return this.profile.attackDamage ?? 0;
+      if (this.profile.attackType === "ranged") {
+        this.beginRangedAttack(playerPosition);
+      } else {
+        this.attackTimer = this.profile.attackCooldown;
+        this.playTransient(
+          this.profile.animation.attack,
+          this.getClipDuration(this.profile.animation.attack) || 0.42,
+          this.profile.animation.idle,
+        );
+        this.stateMachine.setState(AIState.ATTACK);
+        return this.profile.attackDamage ?? 0;
+      }
     }
 
     if (this.targetDirection && wantsMove) {
@@ -436,7 +469,88 @@ class Zombie {
       this.playLoop(shouldMove ? this.profile.animation.move : this.profile.animation.idle);
     }
 
-    return 0;
+    return resolvedDamage;
+  }
+
+  beginRangedAttack(playerPosition) {
+    const windup = this.profile.attackWindup ?? 0.34;
+    const clipDuration = this.getClipDuration(this.profile.animation.attack) || windup;
+    this.pendingShot = {
+      target: playerPosition.clone(),
+      timer: windup,
+      windup,
+    };
+    this.playTransient(
+      this.profile.animation.attack,
+      windup,
+      this.profile.animation.idle,
+    );
+    this.stateMachine.setState(AIState.ATTACK);
+    this.transientTimer = Math.max(this.transientTimer, Math.min(windup, clipDuration));
+  }
+
+  updatePendingShot(deltaTime, playerPosition, collisionWorld) {
+    if (!this.pendingShot) {
+      return 0;
+    }
+
+    this.pendingShot.timer = Math.max(0, this.pendingShot.timer - deltaTime);
+    if (this.pendingShot.timer > 0) {
+      return 0;
+    }
+
+    return this.resolvePendingShot(playerPosition, collisionWorld);
+  }
+
+  resolvePendingShot(playerPosition, collisionWorld) {
+    const pendingShot = this.pendingShot;
+    this.pendingShot = null;
+    this.attackTimer = this.profile.attackCooldown;
+
+    const muzzle = this.getMuzzlePosition();
+    const desiredTarget = pendingShot.target.clone();
+    let impactPoint = desiredTarget.clone();
+    let blocked = false;
+
+    shotProbeOrigin.copy(muzzle);
+    shotProbeDirection.subVectors(desiredTarget, shotProbeOrigin);
+    const shotDistance = shotProbeDirection.length();
+    if (shotDistance > 0.0001) {
+      shotProbeDirection.normalize();
+      shotProbe.set(shotProbeOrigin, shotProbeDirection);
+      shotProbe.far = shotDistance;
+      const obstacleHit = shotProbe.intersectObjects(collisionWorld.getShootables(), true)[0];
+      if (obstacleHit) {
+        impactPoint.copy(obstacleHit.point);
+        blocked = true;
+      }
+    }
+
+    const planarMissDistance = Math.hypot(
+      playerPosition.x - desiredTarget.x,
+      playerPosition.z - desiredTarget.z,
+    );
+    const verticalMissDistance = Math.abs(playerPosition.y - desiredTarget.y);
+    const hitRadius = this.profile.projectileHitRadius ?? 0.9;
+    const hitPlayer =
+      !blocked &&
+      planarMissDistance <= hitRadius &&
+      verticalMissDistance <= (this.profile.attackHeightTolerance ?? 1.8) &&
+      this.hasLineOfSight(playerPosition, collisionWorld);
+
+    if (hitPlayer) {
+      impactPoint.copy(playerPosition);
+    }
+
+    this.spawnShotEffect(muzzle, impactPoint, hitPlayer);
+    this.playShotAudio();
+    if (!hitPlayer) {
+      this.stateMachine.setState(AIState.PURSUE);
+      return 0;
+    }
+
+    this.stateMachine.setState(AIState.PURSUE);
+    return this.profile.attackDamage ?? 0;
   }
 
   shouldUsePursuitPath(playerPosition, verticalGap, dist) {
@@ -447,11 +561,15 @@ class Zombie {
     const verticalThreshold =
       GAME_CONFIG.survival.routeAssist?.verticalThreshold ?? 1.35;
 
-    if (dist > this.profile.attackRange * 1.35) {
+    if (this.activePath.length > 0 && this.pathIndex < this.activePath.length) {
       return true;
     }
 
-    if (verticalGap > verticalThreshold) {
+    if (dist > this.profile.attackRange * 1.2) {
+      return true;
+    }
+
+    if (verticalGap > verticalThreshold * 0.6) {
       return true;
     }
 
@@ -476,9 +594,11 @@ class Zombie {
       return playerPosition;
     }
 
+    const climbingPath = this.isClimbingPath(playerPosition);
+    const arrivalRadius = climbingPath ? 1.35 : 1.05;
     while (
       this.pathIndex < this.activePath.length &&
-      this.collider.start.distanceTo(this.activePath[this.pathIndex]) <= 1.05
+      this.collider.start.distanceTo(this.activePath[this.pathIndex]) <= arrivalRadius
     ) {
       this.pathIndex += 1;
     }
@@ -505,14 +625,7 @@ class Zombie {
         playerPosition,
       );
 
-      this.activePath = (path ?? [])
-        .map((point) => new THREE.Vector3(...point))
-        .filter((point, index) => {
-          if (index === 0) {
-            return this.collider.start.distanceTo(point) > 0.85;
-          }
-          return true;
-        });
+      this.activePath = this.optimizePath(path ?? [], playerPosition);
       this.pathIndex = 0;
       this.activeWaypoint = this.activePath[0] ?? null;
       this.lastWaypointTarget = playerPosition.clone();
@@ -520,13 +633,17 @@ class Zombie {
     }
 
     if (this.activePath.length > 1) {
-      this.activeWaypoint = this.getSmoothedWaypoint(playerPosition, collisionWorld);
+      this.activeWaypoint = this.getSmoothedWaypoint(
+        playerPosition,
+        collisionWorld,
+        this.isClimbingPath(playerPosition),
+      );
     }
 
     return this.activeWaypoint ?? playerPosition;
   }
 
-  getSmoothedWaypoint(playerPosition, collisionWorld) {
+  getSmoothedWaypoint(playerPosition, collisionWorld, climbingPath = false) {
     let furthestVisible = this.activePath[this.pathIndex] ?? null;
     if (!furthestVisible) {
       return null;
@@ -534,11 +651,14 @@ class Zombie {
 
     for (
       let index = this.pathIndex;
-      index < Math.min(this.activePath.length, this.pathIndex + 4);
+      index < Math.min(this.activePath.length, this.pathIndex + 6);
       index += 1
     ) {
       const candidate = this.activePath[index];
-      if (!this.isPathSegmentBlocked(candidate, collisionWorld)) {
+      if (
+        !this.isPathSegmentBlocked(candidate, collisionWorld) &&
+        this.isReasonablePathStep(candidate, furthestVisible)
+      ) {
         furthestVisible = candidate;
         continue;
       }
@@ -546,14 +666,123 @@ class Zombie {
     }
 
     if (
+      !climbingPath &&
       playerPosition &&
       !this.isPathSegmentBlocked(playerPosition, collisionWorld) &&
-      this.collider.start.distanceTo(playerPosition) <= this.profile.attackRange * 3
+      Math.abs(playerPosition.y - this.getFootY()) <=
+        (this.profile.attackHeightTolerance ?? 1.8) * 1.35 &&
+      this.collider.start.distanceTo(playerPosition) <= this.profile.attackRange * 2.4
     ) {
       return playerPosition;
     }
 
     return furthestVisible;
+  }
+
+  optimizePath(rawPath, playerPosition) {
+    const points = [];
+
+    for (const point of rawPath) {
+      const vector = point.isVector3
+        ? point.clone()
+        : Array.isArray(point)
+          ? new THREE.Vector3(...point)
+          : new THREE.Vector3(point.x, point.y, point.z);
+
+      if (points.length === 0) {
+        if (this.collider.start.distanceTo(vector) > 0.85) {
+          points.push(vector);
+        }
+        continue;
+      }
+
+      if (points[points.length - 1].distanceTo(vector) > 0.7) {
+        points.push(vector);
+      }
+    }
+
+    if (points.length < 3) {
+      return points;
+    }
+
+    const simplified = [points[0]];
+    for (let index = 1; index < points.length - 1; index += 1) {
+      pathPrev.copy(simplified[simplified.length - 1]);
+      pathCurrent.copy(points[index]);
+      pathNext.copy(points[index + 1]);
+
+      pathSegmentA.subVectors(pathCurrent, pathPrev);
+      pathSegmentB.subVectors(pathNext, pathCurrent);
+      const verticalChange =
+        Math.max(
+          Math.abs(pathCurrent.y - pathPrev.y),
+          Math.abs(pathNext.y - pathCurrent.y),
+        );
+
+      pathSegmentA.y = 0;
+      pathSegmentB.y = 0;
+      const planarLengthA = pathSegmentA.length();
+      const planarLengthB = pathSegmentB.length();
+
+      if (planarLengthA < 0.001 || planarLengthB < 0.001) {
+        continue;
+      }
+
+      const turn = pathSegmentA.normalize().dot(pathSegmentB.normalize());
+      const sameLevel = verticalChange < 0.45;
+      if (sameLevel && turn > 0.985) {
+        continue;
+      }
+
+      simplified.push(points[index]);
+    }
+
+    simplified.push(points[points.length - 1]);
+
+    if (
+      playerPosition &&
+      simplified.length > 0 &&
+      simplified[simplified.length - 1].distanceTo(playerPosition) > 1.2
+    ) {
+      simplified.push(playerPosition.clone());
+    }
+
+    return simplified;
+  }
+
+  isClimbingPath(playerPosition) {
+    if (this.activePath.length === 0 || !playerPosition) {
+      return false;
+    }
+
+    const currentFootY = this.getFootY();
+    const playerRise = playerPosition.y - currentFootY;
+    if (playerRise <= 0.6) {
+      return false;
+    }
+
+    for (let index = this.pathIndex; index < this.activePath.length; index += 1) {
+      const point = this.activePath[index];
+      if (point.y - currentFootY > 0.55) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  isReasonablePathStep(candidate, previousCandidate) {
+    if (!previousCandidate) {
+      return true;
+    }
+
+    const verticalGap = Math.abs(candidate.y - previousCandidate.y);
+    const planarGap = Math.hypot(
+      candidate.x - previousCandidate.x,
+      candidate.z - previousCandidate.z,
+    );
+
+    return verticalGap <= 2.4 && planarGap <= 12;
   }
 
   isPathSegmentBlocked(targetPosition, collisionWorld) {
@@ -710,6 +939,104 @@ class Zombie {
     return !visibilityProbe.intersectObjects(collisionWorld.getShootables(), true)[0];
   }
 
+  getMuzzlePosition() {
+    muzzleForward.set(0, 0, 1).applyAxisAngle(UP, this.group.rotation.y).normalize();
+    return new THREE.Vector3(
+      this.collider.start.x,
+      this.getFootY() + (this.profile.eyeHeight ?? 1) * 0.92,
+      this.collider.start.z,
+    ).addScaledVector(muzzleForward, this.profile.radius + 0.24);
+  }
+
+  createShotAudio() {
+    const shotPath = this.profile.sounds?.shoot;
+    if (!shotPath) {
+      return null;
+    }
+
+    const audio = new Audio(shotPath);
+    audio.preload = "auto";
+    audio.volume = 0.32;
+    return audio;
+  }
+
+  playShotAudio() {
+    if (!this.shotAudio) {
+      return;
+    }
+
+    this.shotAudio.pause();
+    this.shotAudio.currentTime = 0;
+    this.shotAudio.playbackRate = 0.96 + Math.random() * 0.08;
+    this.shotAudio.play().catch(() => {});
+  }
+
+  spawnShotEffect(origin, target, hitPlayer) {
+    const color = this.profile.shotVisualColor ?? 0xff9f70;
+    const duration = this.profile.shotVisualDuration ?? 0.09;
+
+    const lineGeometry = new THREE.BufferGeometry().setFromPoints([origin, target]);
+    const lineMaterial = new THREE.LineBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.95,
+    });
+    const line = new THREE.Line(lineGeometry, lineMaterial);
+    this.scene.add(line);
+
+    let flash = null;
+    if (this.shotFlashGeometry) {
+      flash = new THREE.Mesh(
+        this.shotFlashGeometry,
+        new THREE.MeshBasicMaterial({
+          color,
+          transparent: true,
+          opacity: hitPlayer ? 1 : 0.82,
+        }),
+      );
+      flash.position.copy(origin);
+      flash.scale.setScalar(hitPlayer ? 1.15 : 0.95);
+      this.scene.add(flash);
+    }
+
+    this.shotEffects.push({
+      age: 0,
+      duration,
+      flash,
+      line,
+      lineMaterial,
+    });
+  }
+
+  updateShotEffects(deltaTime) {
+    for (let index = this.shotEffects.length - 1; index >= 0; index -= 1) {
+      const effect = this.shotEffects[index];
+      effect.age += deltaTime;
+      const alpha = Math.max(0, 1 - effect.age / effect.duration);
+      effect.lineMaterial.opacity = alpha;
+
+      if (effect.flash) {
+        effect.flash.material.opacity = alpha;
+        effect.flash.scale.multiplyScalar(1 + deltaTime * 2.5);
+      }
+
+      if (effect.age < effect.duration) {
+        continue;
+      }
+
+      this.scene.remove(effect.line);
+      effect.line.geometry.dispose();
+      effect.lineMaterial.dispose();
+
+      if (effect.flash) {
+        this.scene.remove(effect.flash);
+        effect.flash.material.dispose();
+      }
+
+      this.shotEffects.splice(index, 1);
+    }
+  }
+
   flashHit() {
     this.group.traverse((child) => {
       const materials = Array.isArray(child.material)
@@ -840,6 +1167,22 @@ class Zombie {
   }
 
   dispose() {
+    if (this.pendingShot) {
+      this.pendingShot = null;
+    }
+
+    for (const effect of this.shotEffects) {
+      this.scene.remove(effect.line);
+      effect.line.geometry.dispose();
+      effect.lineMaterial.dispose();
+
+      if (effect.flash) {
+        this.scene.remove(effect.flash);
+        effect.flash.material.dispose();
+      }
+    }
+    this.shotEffects = [];
+    this.shotFlashGeometry?.dispose();
     this.scene.remove(this.group);
   }
 }
